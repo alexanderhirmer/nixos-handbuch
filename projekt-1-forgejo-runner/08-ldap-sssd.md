@@ -23,7 +23,7 @@ $ ldapsearch -x -H <ldap-uri> -b <ldap-base-dn> -s base
 
 Kommt ein Ergebnis ohne "Invalid credentials", genügt anonymes Lesen und `ldap.nix` braucht keinen Bind-DN. Verlangt der Server eine Authentifizierung, ist ein Bind-DN samt Passwort nötig (siehe Warnbox unten).
 
-**2. `ldap.nix` anlegen** (Inhalt siehe Abschnitt „Dateien"), danach in `default.nix` importieren, testweise bauen und aktivieren:
+**2. `ldap.nix` anlegen** (Inhalt siehe Abschnitt "Dateien"), danach in `default.nix` importieren, testweise bauen und aktivieren:
 
 ```console
 $ nixos-rebuild build --flake /etc/nixos#<hostname>
@@ -37,6 +37,8 @@ $ ssh -p <ssh-port> testuser@<ip>
 ```
 
 ## Dateien
+
+`<repo-root>/modules/baseline/ldap.nix` (neu):
 
 ```nix
 # <repo-root>/modules/baseline/ldap.nix
@@ -70,18 +72,16 @@ $ ssh -p <ssh-port> testuser@<ip>
 }
 ```
 
-```diff
- # <repo-root>/modules/baseline/default.nix
- { ... }:
- {
-   imports = [
-     ./users.nix
-     ./sudo.nix
-     ./ssh.nix
-     ./fail2ban.nix
-+    ./ldap.nix
-   ];
- }
+`<repo-root>/modules/baseline/default.nix` (geändert, eine Zeile):
+
+```nix
+  imports = [
+    ./users.nix
+    ./sudo.nix
+    ./ssh.nix
+    ./fail2ban.nix
++   ./ldap.nix
+  ];
 ```
 
 > 💡 **Nice to know:** `services.sssd.enable = true` verdrahtet mehr automatisch, als es aussieht. NSS: Das Modul setzt `system.nssModules = [ pkgs.sssd ]` und trägt `sss` in `system.nssDatabases.passwd/group/shadow` ein, also fragt `/etc/nsswitch.conf` zusätzlich zu `/etc/passwd` auch sssd. PAM: `security/pam.nix` hängt für **jeden** Standard-PAM-Service (auch `sshd`) automatisch einen `pam_sss.so`-Eintrag in `auth`/`account`/`session` an (`enable = config.services.sssd.enable`) – nichts davon selbst konfigurieren. `users.mutableUsers = false` ändert daran nichts: Die Option schreibt nur `/etc/passwd`/`/etc/group` strikt aus `users.users` fest, die NSS-Quelle `sss` betrifft sie nicht. Quelle: [nixpkgs, `services/misc/sssd.nix`](https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/services/misc/sssd.nix), [nixpkgs, `security/pam.nix`](https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/security/pam.nix).
@@ -109,4 +109,4 @@ $ ssh -p <ssh-port> testuser@<ip>
 
 ## Querverweis
 
-LDAP/sssd kommt in Teil I nicht vor – reines Projekt-II-Terrain. Direkt relevant ist aber Kapitel 6, „Nutzerverwaltung & SSH-Keys" ([06-alltagsbetrieb.md](../06-alltagsbetrieb.md)): Dort wird erklärt, was `users.mutableUsers = false` überhaupt einschränkt (`/etc/passwd`/`/etc/group`) – genau die Grenze, die LDAP-Nutzer über die separate NSS-Quelle `sss` umgehen.
+LDAP/sssd kommt in Teil I nicht vor – reines Projekt-II-Terrain. Direkt relevant ist aber Kapitel 6, "Nutzerverwaltung & SSH-Keys" ([06-alltagsbetrieb.md](../06-alltagsbetrieb.md)): Dort wird erklärt, was `users.mutableUsers = false` überhaupt einschränkt (`/etc/passwd`/`/etc/group`) – genau die Grenze, die LDAP-Nutzer über die separate NSS-Quelle `sss` umgehen.

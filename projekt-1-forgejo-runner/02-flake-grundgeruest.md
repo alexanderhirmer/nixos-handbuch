@@ -97,7 +97,7 @@ $ nixos-rebuild switch --flake /etc/nixos#<hostname>
 }
 ```
 
-> ⚠️ Ungeprüft: `defaultGateway` und die Präfixlänge stehen hier als Beispiel (`/24`, Gateway `10.20.0.1`) – die Platzhaltertabelle in `00-uebersicht.md` definiert dafür keinen eigenen Platzhalter. Ermittle beides vor dem Umstieg auf `pct enter` im noch laufenden DHCP-Zustand mit `ip route show` (zeigt das aktuell zugewiesene Gateway) und trage die realen Werte deines Netzes ein.
+`networking.defaultGateway` akzeptiert laut Nixpkgs-Quellcode sowohl einen bloßen String als auch ein Options-Set mit `address`/`interface` – der String wird automatisch auf Ersteres abgebildet.<sup>2</sup> Welcher Wert und welche Präfixlänge bei dir stimmen, steht hier nur beispielhaft (`/24`, Gateway `10.20.0.1`) – die Platzhaltertabelle in `00-uebersicht.md` definiert dafür bewusst keinen eigenen Platzhalter. Ermittle beides vor dem Umstieg auf `pct enter` im noch laufenden DHCP-Zustand mit `ip route show` (zeigt das aktuell zugewiesene Gateway) und trage die realen Werte deines Netzes ein.
 
 ## Prüfen
 
@@ -121,4 +121,6 @@ Flakes, `flake.nix`/`flake.lock`, `nixosSystem` und Reproduzierbarkeit: Teil I, 
 
 ---
 
-<sup>1</sup> `pct push <vmid> <lokale-datei> <ziel-im-container>` kopiert genau eine Datei vom Proxmox-Host in den Container, unabhängig vom Netzwerkzustand des Gasts; `pct pull` ist das Gegenstück. Quelle: [Proxmox-Community-Zusammenfassung der `pct`-Subcommands](https://gist.github.com/tinoji/7e066d61a84d98374b08d2414d9524f2) – die offizielle Proxmox-Dokumentation war aus dieser Umgebung heraus per Netzzugriff nicht erreichbar, die Syntax ist aber über mehrere unabhängige Community-Quellen deckungsgleich bestätigt.
+<sup>1</sup> `pct push <vmid>` gefolgt von Quellpfad auf dem Proxmox-Host und Zielpfad im Container kopiert genau eine Datei in den Container, unabhängig vom Netzwerkzustand des Gasts; `pct pull` ist das Gegenstück (Zielpfad und Quellpfad vertauscht). Quelle: [Proxmox-Community-Zusammenfassung der `pct`-Subcommands](https://gist.github.com/tinoji/7e066d61a84d98374b08d2414d9524f2) – die offizielle Proxmox-Dokumentation war aus dieser Umgebung heraus per Netzzugriff nicht erreichbar, die Syntax ist aber über mehrere unabhängige Community-Quellen deckungsgleich bestätigt.
+
+<sup>2</sup> Quelle: Nixpkgs-Quellcode, `nixos/modules/tasks/network-interfaces.nix` (Branch `release-26.05`), Option `networking.defaultGateway`: `type = types.nullOr (types.coercedTo types.str gatewayCoerce (types.submodule gatewayOpts));` – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/tasks/network-interfaces.nix

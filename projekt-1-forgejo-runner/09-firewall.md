@@ -32,6 +32,8 @@ $ ssh -p <ssh-port> <admin-user>@<ip>
 
 ## Dateien
 
+`<repo-root>/modules/baseline/firewall.nix` (neu):
+
 ```nix
 # <repo-root>/modules/baseline/firewall.nix
 { ... }:
@@ -45,24 +47,22 @@ $ ssh -p <ssh-port> <admin-user>@<ip>
 }
 ```
 
-```diff
- # <repo-root>/modules/baseline/default.nix
- { ... }:
- {
-   imports = [
-     ./users.nix
-     ./sudo.nix
-     ./ssh.nix
-     ./fail2ban.nix
-     ./ldap.nix
-+    ./firewall.nix
-   ];
- }
+`<repo-root>/modules/baseline/default.nix` (geändert, eine Zeile):
+
+```nix
+  imports = [
+    ./users.nix
+    ./sudo.nix
+    ./ssh.nix
+    ./fail2ban.nix
+    ./ldap.nix
++   ./firewall.nix
+  ];
 ```
 
-> 💡 **Nice to know – der eigentliche Lehrpunkt:** `networking.firewall` filtert nur *eingehende* Verbindungen; für selbst aufgebaute ausgehende gibt es in `nixos/modules/services/networking/firewall.nix` keine Default-Restriktion (kein „deny outbound"). Der Forgejo-Runner meldet sich per Long-Polling *aktiv* bei `<forgejo-url>` – eine ausgehende Verbindung, braucht also **keinen** offenen Port. Genauso die LDAP-Anbindung an `<ldap-uri>` aus Schritt 8. Eingehend braucht dieser Host nur SSH. Quelle: [nixpkgs, `services/networking/firewall.nix`](https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/services/networking/firewall.nix).
+> 💡 **Nice to know:** `networking.firewall` filtert nur *eingehende* Verbindungen – der eigentliche Lehrpunkt dieses Schritts; für selbst aufgebaute ausgehende gibt es in `nixos/modules/services/networking/firewall.nix` keine Default-Restriktion (kein "deny outbound"). Der Forgejo-Runner meldet sich per Long-Polling *aktiv* bei `<forgejo-url>` – eine ausgehende Verbindung, braucht also **keinen** offenen Port. Genauso die LDAP-Anbindung an `<ldap-uri>` aus Schritt 8. Eingehend braucht dieser Host nur SSH. Quelle: [nixpkgs, `services/networking/firewall.nix`](https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/services/networking/firewall.nix).
 
-> 💡 **Nice to know:** `networking.nftables.enable` (Default `false`) ändert weniger als der Name suggeriert. Nixpkgs baut `pkgs.iptables` standardmäßig mit `nftablesCompat = true`: `iptables`/`ip6tables` sind Symlinks auf `xtables-nft-multi` und übersetzen Regeln ohnehin in den nf_tables-Kernel-Mechanismus. „iptables" oder „nftables" als Backend ist im Kern dieselbe Kernel-Infrastruktur. Quelle: [nixpkgs, `pkgs/by-name/ip/iptables/package.nix`](https://github.com/NixOS/nixpkgs/blob/release-26.05/pkgs/by-name/ip/iptables/package.nix).
+> 💡 **Nice to know:** `networking.nftables.enable` (Default `false`) ändert weniger als der Name suggeriert. Nixpkgs baut `pkgs.iptables` standardmäßig mit `nftablesCompat = true`: `iptables`/`ip6tables` sind Symlinks auf `xtables-nft-multi` und übersetzen Regeln ohnehin in den nf_tables-Kernel-Mechanismus. "iptables" oder "nftables" als Backend ist im Kern dieselbe Kernel-Infrastruktur. Quelle: [nixpkgs, `pkgs/by-name/ip/iptables/package.nix`](https://github.com/NixOS/nixpkgs/blob/release-26.05/pkgs/by-name/ip/iptables/package.nix).
 
 > ⚠️ Ungeprüft: Ob die NixOS-Firewall in einem *unprivilegierten* Proxmox-LXC-Container zuverlässig funktioniert, ließ sich in meiner Recherche-Umgebung nicht an einer Proxmox-Primärquelle verifizieren (`pve.proxmox.com` war nicht erreichbar). Mehrere übereinstimmende Community-Quellen (Proxmox-Forum, LXC-Projekt) sagen: nftables/iptables funktionieren in einem unprivilegierten Container grundsätzlich, sofern `CAP_NET_ADMIN` im eigenen Namespace vorhanden ist – das ist bei Standard-Proxmox-Containern der Fall, auch ohne das für Docker-artiges Nesting nötige `features: nesting=1`. Trotzdem: nach `switch` per `nft list ruleset` im Container prüfen, ob überhaupt eine Regelmenge geladen ist.
 
@@ -88,4 +88,4 @@ $ ssh -p <ssh-port> <admin-user>@<ip>
 
 ## Querverweis
 
-Kapitel 6, „Netzwerk-Grundlagen & Firewall" ([06-alltagsbetrieb.md](../06-alltagsbetrieb.md)): Dort werden `networking.firewall.enable`, `allowedTCPPorts` und `allowPing` erstmals eingeführt, inklusive des Hinweises, dass `services.openssh.openFirewall` denselben Mechanismus nur bequemer macht – hier wird er stattdessen bewusst explizit in einer eigenen Datei gepflegt.
+Kapitel 6, "Netzwerk-Grundlagen & Firewall" ([06-alltagsbetrieb.md](../06-alltagsbetrieb.md)): Dort werden `networking.firewall.enable`, `allowedTCPPorts` und `allowPing` erstmals eingeführt, inklusive des Hinweises, dass `services.openssh.openFirewall` denselben Mechanismus nur bequemer macht – hier wird er stattdessen bewusst explizit in einer eigenen Datei gepflegt.
