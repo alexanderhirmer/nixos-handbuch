@@ -49,15 +49,18 @@ $ ssh -p <ssh-port> <admin-user>@<ip>
 
 `<repo-root>/modules/baseline/default.nix` (geändert, eine Zeile):
 
-```nix
-  imports = [
-    ./users.nix
-    ./sudo.nix
-    ./ssh.nix
-    ./fail2ban.nix
-    ./ldap.nix
-+   ./firewall.nix
-  ];
+```diff
+--- a/modules/baseline/default.nix
++++ b/modules/baseline/default.nix
+@@
+   imports = [
+     ./users.nix
+     ./sudo.nix
+     ./ssh.nix
+     ./fail2ban.nix
+     ./ldap.nix
++    ./firewall.nix
+   ];
 ```
 
 > 💡 **Nice to know:** `networking.firewall` filtert nur *eingehende* Verbindungen – der eigentliche Lehrpunkt dieses Schritts; für selbst aufgebaute ausgehende gibt es in `nixos/modules/services/networking/firewall.nix` keine Default-Restriktion (kein "deny outbound"). Der Forgejo-Runner meldet sich per Long-Polling *aktiv* bei `<forgejo-url>` – eine ausgehende Verbindung, braucht also **keinen** offenen Port. Genauso die LDAP-Anbindung an `<ldap-uri>` aus Schritt 8. Eingehend braucht dieser Host nur SSH. Quelle: [nixpkgs, `services/networking/firewall.nix`](https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/services/networking/firewall.nix).

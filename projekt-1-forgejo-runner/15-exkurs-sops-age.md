@@ -11,7 +11,7 @@ Neben `modules/runner/runner.env` (Schritt 12, Klartext im Store) existiert `<re
 
 ## Voraussetzung
 
-Teil I, Kapitel 10 ("Secrets") ist gelesen – sops-nix-Grundmechanik, age vs. GPG und `/run/secrets/…` werden hier vorausgesetzt, nicht wiederholt. Schritt 5 (Container hat einen SSH-Host-Key, standardmäßig auch als ed25519 unter `/etc/ssh/ssh_host_ed25519_key`) und Schritt 12/13 sind abgeschlossen.
+Teil I, Kapitel 10 ("Secrets") ist gelesen – sops-nix-Grundmechanik, age vs. GPG und `/run/secrets/…` werden hier vorausgesetzt, nicht wiederholt. Schritt 5 (Container hat einen SSH-Host-Key, standardmäßig auch als ed25519 unter `/etc/ssh/ssh_host_ed25519_key`) und Schritt 12/13 sind abgeschlossen: `forgejo-runner.nix` trägt seit Schritt 12 `{ pkgs, utils, ... }:` im Funktionskopf und setzt `systemd.services."gitea-runner-${utils.escapeSystemdPath "<runner-name>"}".serviceConfig.EnvironmentFile = [ "${./runner.env}" ];` – eine zweite, mit der `tokenFile`-Zeile aus Schritt 11 zusammengeführte `EnvironmentFile`-Angabe (Listen-Merge von `unitOption`, siehe Schritt 12).
 
 ## Durchführung
 
@@ -57,25 +57,28 @@ FORGEJO_RUNNER_LOG_LEVEL=info
 --- a/modules/runner/forgejo-runner.nix
 +++ b/modules/runner/forgejo-runner.nix
 @@
+-{ pkgs, utils, ... }:
++{ config, pkgs, utils, ... }:
+ {
 +  sops.age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
 +  sops.secrets."runner-env" = {
 +    sopsFile = ../../secrets/runner.env;
 +    format = "dotenv";
-+    # world-readable statt eines engen owner: gitea-runner ist ein
-+    # DynamicUser (Schritt 11/13) ohne feste, vorab bekannte UID – ein
-+    # sops-owner setzt aber einen bereits existierenden Nutzernamen
-+    # voraus. Für ein echtes Geheimnis bräuchte es einen statischen
-+    # Dienst-Nutzer; hier genügt es, weil runner.env laut Schritt 12
-+    # ohnehin keine Zugangsdaten enthält.
-+    mode = "0444";
 +  };
-   services.gitea-actions-runner.instances."<runner-name>" = {
-     …
-     settings.runner.env_file =
--      ./runner.env;
-+      config.sops.secrets."runner-env".path;
++
+   services.gitea-actions-runner = {
+     package = pkgs.forgejo-runner;
+     instances."<runner-name>" = { … };
    };
+
+   systemd.services."gitea-runner-${utils.escapeSystemdPath "<runner-name>"}".serviceConfig.EnvironmentFile = [
+-    "${./runner.env}"
++    config.sops.secrets."runner-env".path
+   ];
+ }
 ```
+
+`sops.secrets."runner-env"` braucht hier **keine** eigene `mode`/`owner`-Einstellung – der sops-nix-Default (`root:root`, `0400`) genügt. Der Grund ist derselbe wie bei `tokenFile` in Schritt 13: `EnvironmentFile=` liest der systemd-**Manager** (root), bevor er auf den `DynamicUser`-Nutzer `gitea-runner` wechselt – der Runner-Prozess selbst braucht nie Leserechte auf diese Datei.
 
 `<repo-root>/flake.nix` (geändert):
 

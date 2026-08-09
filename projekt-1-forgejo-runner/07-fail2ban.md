@@ -51,13 +51,16 @@ $ nixos-rebuild switch --flake /etc/nixos#<hostname>
 
 `<repo-root>/modules/baseline/default.nix` (geändert, eine Zeile):
 
-```nix
-  imports = [
-    ./users.nix
-    ./sudo.nix
-    ./ssh.nix
-+   ./fail2ban.nix
-  ];
+```diff
+--- a/modules/baseline/default.nix
++++ b/modules/baseline/default.nix
+@@
+   imports = [
+     ./users.nix
+     ./sudo.nix
+     ./ssh.nix
++    ./fail2ban.nix
+   ];
 ```
 
 ## Prüfen

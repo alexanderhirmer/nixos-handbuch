@@ -74,14 +74,17 @@ $ ssh -p <ssh-port> testuser@<ip>
 
 `<repo-root>/modules/baseline/default.nix` (geändert, eine Zeile):
 
-```nix
-  imports = [
-    ./users.nix
-    ./sudo.nix
-    ./ssh.nix
-    ./fail2ban.nix
-+   ./ldap.nix
-  ];
+```diff
+--- a/modules/baseline/default.nix
++++ b/modules/baseline/default.nix
+@@
+   imports = [
+     ./users.nix
+     ./sudo.nix
+     ./ssh.nix
+     ./fail2ban.nix
++    ./ldap.nix
+   ];
 ```
 
 > 💡 **Nice to know:** `services.sssd.enable = true` verdrahtet mehr automatisch, als es aussieht. NSS: Das Modul setzt `system.nssModules = [ pkgs.sssd ]` und trägt `sss` in `system.nssDatabases.passwd/group/shadow` ein, also fragt `/etc/nsswitch.conf` zusätzlich zu `/etc/passwd` auch sssd. PAM: `security/pam.nix` hängt für **jeden** Standard-PAM-Service (auch `sshd`) automatisch einen `pam_sss.so`-Eintrag in `auth`/`account`/`session` an (`enable = config.services.sssd.enable`) – nichts davon selbst konfigurieren. `users.mutableUsers = false` ändert daran nichts: Die Option schreibt nur `/etc/passwd`/`/etc/group` strikt aus `users.users` fest, die NSS-Quelle `sss` betrifft sie nicht. Quelle: [nixpkgs, `services/misc/sssd.nix`](https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/services/misc/sssd.nix), [nixpkgs, `security/pam.nix`](https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/security/pam.nix).
