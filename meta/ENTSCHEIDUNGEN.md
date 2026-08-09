@@ -74,6 +74,21 @@ zugehörigen Schritt verlinkt):
   innerhalb von Proxmox-LXC-Containern historisch nicht immer
   zuverlässig war; deshalb testet der nächste Schritt zunächst mit
   `nixos-rebuild build`, bevor `switch` läuft.
+- `--ostype unmanaged` und der Nixpkgs-Default `proxmoxLXC.manageNetwork
+  = false` treffen gegenläufige Annahmen und ergeben zusammen einen
+  Container **ohne IP und ohne DNS**: Proxmox' Setup-Plugin
+  `PVE::LXC::Setup::Unmanaged` hat leere `setup_network`/`set_hostname`/
+  `set_dns`-Rümpfe, während `proxmox-lxc.nix` bei `manageNetwork = false`
+  genau `useDHCP = false; useNetworkd = true; useHostResolvConf = false;`
+  setzt und darauf wartet, dass Proxmox etwas hinterlegt hat. Deshalb
+  trägt schon `bootstrap.nix` (Schritt 1) `proxmoxLXC.manageNetwork =
+  true;` und `networking.useDHCP = true;` — sonst kann Schritt 2 von
+  innen kein `nixpkgs` laden. Beim Übertragen der Baseline auf Projekt 2/3
+  (VMs statt LXC) entfällt dieser Sonderfall.
+- `pve.proxmox.com` und `git.proxmox.com` sind aus der Arbeitsumgebung
+  nicht erreichbar. Belastbarer Ersatz für Proxmox-Behauptungen ist der
+  GitHub-Spiegel des Quellcodes (`github.com/proxmox/pve-container`),
+  nicht Community-Gists — so sind `pct push`/`pct pull` belegt.
 - Ob `/etc/services` unter NixOS nach einer SSH-Port-Änderung angepasst
   werden muss: **Noch nicht abschließend im Schritt dokumentiert** —
   offener Recherchepunkt für den SSH-Härtung-Schritt (voraussichtlich

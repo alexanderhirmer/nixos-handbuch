@@ -11,7 +11,7 @@ weight: 2
 
 ## Voraussetzung
 
-Schritt 1 ist abgeschlossen: Container `<vmid>` läuft, ist per `pct enter <vmid>` erreichbar und hängt noch per DHCP im Netz. `/etc/nixos` im Container ist leer – das Bootstrap-Template aus Schritt 1 hat nichts dorthin geschrieben, es hat nur das Image gebaut.
+Schritt 1 ist abgeschlossen: Container `<vmid>` läuft, ist per `pct enter <vmid>` erreichbar und hängt – dank der beiden Netzwerkzeilen in `bootstrap.nix` – per DHCP im Netz. Prüfe das vor dem Weitermachen mit `ip -4 addr show eth0`: Ohne Adresse und Namensauflösung kann der Build in diesem Schritt kein `nixpkgs` laden. `/etc/nixos` im Container ist leer – das Bootstrap-Template aus Schritt 1 hat nichts dorthin geschrieben, es hat nur das Image gebaut.
 
 ## Durchführung
 
@@ -73,8 +73,12 @@ $ nixos-rebuild switch --flake /etc/nixos#<hostname>
 {
   imports = [ (modulesPath + "/virtualisation/proxmox-lxc.nix") ];
 
-  # Ohne diese beiden Flags erzwingt das Modul einen leeren hostName und
-  # erwartet Netzwerkdaten von Proxmox statt aus dieser Datei.
+  # manageNetwork = false (der Default) hiesse: useDHCP = false,
+  # useNetworkd = true und hostName = mkForce "" – das Modul erwartet dann
+  # Netzwerkdaten und Hostnamen von Proxmox statt aus dieser Datei. Genau
+  # das liefert --ostype unmanaged aber nie (siehe Schritt 1). Beide Flags
+  # stehen explizit hier, auch wenn manageHostName = true bei aktivem
+  # manageNetwork streng genommen schon nichts mehr bewirkt.
   proxmoxLXC = {
     manageNetwork = true;
     manageHostName = true;
@@ -121,6 +125,6 @@ Flakes, `flake.nix`/`flake.lock`, `nixosSystem` und Reproduzierbarkeit: Teil I, 
 
 ---
 
-<sup>1</sup> `pct push <vmid>` gefolgt von Quellpfad auf dem Proxmox-Host und Zielpfad im Container kopiert genau eine Datei in den Container, unabhängig vom Netzwerkzustand des Gasts; `pct pull` ist das Gegenstück (Zielpfad und Quellpfad vertauscht). Quelle: [Proxmox-Community-Zusammenfassung der `pct`-Subcommands](https://gist.github.com/tinoji/7e066d61a84d98374b08d2414d9524f2) – die offizielle Proxmox-Dokumentation war aus dieser Umgebung heraus per Netzzugriff nicht erreichbar, die Syntax ist aber über mehrere unabhängige Community-Quellen deckungsgleich bestätigt.
+<sup>1</sup> `pct push <vmid> <file> <destination>` kopiert genau eine Datei vom Proxmox-Host in den Container, `pct pull <vmid> <path> <destination>` ist das Gegenstück. Beide Signaturen stehen so in der Kommandotabelle des Proxmox-Quellcodes (`push => [__PACKAGE__, 'push', ['vmid', 'file', 'destination']]`); dort steht auch die Einschränkung `can only push files to a running CT`. Quelle: [Proxmox `pve-container`, `src/PVE/CLI/pct.pm`](https://github.com/proxmox/pve-container/blob/master/src/PVE/CLI/pct.pm). Die gerenderte Handbuchseite auf `pve.proxmox.com` war aus dieser Umgebung heraus nicht erreichbar – der Quellcode ist die belastbarere Quelle.
 
 <sup>2</sup> Quelle: Nixpkgs-Quellcode, `nixos/modules/tasks/network-interfaces.nix` (Branch `release-26.05`), Option `networking.defaultGateway`: `type = types.nullOr (types.coercedTo types.str gatewayCoerce (types.submodule gatewayOpts));` – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/tasks/network-interfaces.nix
