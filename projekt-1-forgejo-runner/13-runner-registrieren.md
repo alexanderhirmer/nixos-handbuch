@@ -7,11 +7,11 @@ weight: 13
 
 ## Ziel
 
-`services.gitea-actions-runner.instances."<runner-name>"` bekommt über `tokenFile` (nicht `token`) ein in der Forgejo-Weboberfläche erzeugtes Registrierungs-Token. Der Runner registriert sich beim ersten Start selbstständig bei `<forgejo-url>` und erscheint dort als online.
+Die in Schritt 11 bereits konfigurierte `tokenFile` wird mit einem in der Forgejo-Weboberfläche erzeugten Registrierungs-Token befüllt; der Runner registriert sich daraufhin selbstständig bei `<forgejo-url>` und erscheint dort als online.
 
 ## Voraussetzung
 
-Schritte 10–12 sind abgeschlossen: Podman läuft, `modules/runner/forgejo-runner.nix` definiert die Instanz bereits mit `name`, `url`, `labels`, aber ohne `token`/`tokenFile` – ein `nixos-rebuild build` bricht deshalb an dieser Stelle mit der nixpkgs-eigenen Assertion ab: *"Instances of gitea-actions-runner can have `token` or `tokenFile`, not both."*<sup>1</sup> (dieselbe Meldung erscheint auch, wenn – wie hier – **keins** von beiden gesetzt ist). `modules/runner/runner.env` (Schritt 12) ist unabhängig davon und bleibt unverändert. Netzwerkzugriff auf `<forgejo-url>` besteht bereits (Schritt 9, ausgehend unbeschränkt).
+Schritte 10–12 sind abgeschlossen: Podman läuft, und `modules/runner/forgejo-runner.nix` definiert die Instanz `<runner-name>` samt `name`, `url`, `labels` und – seit Schritt 11 – `tokenFile = "/etc/gitea-runner-<runner-name>-token.env"`. Diese Datei existiert bewusst noch nicht: Der Build läuft durch, aber der Dienst scheitert beim Start an der fehlenden `EnvironmentFile` und rotiert in der Neustart-Schleife. Genau diesen Zustand hat Schritt 12 zuletzt bestätigt. `modules/runner/runner.env` bleibt in diesem Schritt unverändert. Netzwerkzugriff auf `<forgejo-url>` besteht bereits (Schritt 9, ausgehend unbeschränkt).
 
 ## Durchführung
 
@@ -24,42 +24,31 @@ Schritte 10–12 sind abgeschlossen: Podman läuft, `modules/runner/forgejo-runn
 **3. Token-Datei außerhalb des Stores anlegen** – dasselbe Muster wie in Schritt 8 für das LDAP-Bind-Passwort:
 
 ```console
-$ pct exec <vmid> -- sh -c 'umask 077; printf "TOKEN=%s\n" "<token-aus-weboberflaeche>" > /etc/gitea-runner-token.env'
-$ pct exec <vmid> -- chown root:root /etc/gitea-runner-token.env
-$ pct exec <vmid> -- chmod 600 /etc/gitea-runner-token.env
+$ pct exec <vmid> -- sh -c 'umask 077; printf "TOKEN=%s\n" "<token-aus-weboberflaeche>" \
+    > /etc/gitea-runner-<runner-name>-token.env'
+$ pct exec <vmid> -- chown root:root /etc/gitea-runner-<runner-name>-token.env
+$ pct exec <vmid> -- chmod 600 /etc/gitea-runner-<runner-name>-token.env
 ```
 
-**4. `forgejo-runner.nix` um `tokenFile` ergänzen**, pushen, testen, aktivieren:
+**4. Dienst starten lassen.** An der NixOS-Konfiguration ändert sich in diesem Schritt *nichts* – `tokenFile` zeigt seit Schritt 11 auf genau diesen Pfad, es fehlte nur die Datei. Kein `pct push`, kein Rebuild:
 
 ```console
-$ pct push <vmid> <repo-root>/modules/runner/forgejo-runner.nix \
-    /etc/nixos/modules/runner/forgejo-runner.nix
-$ pct enter <vmid>
-$ nixos-rebuild build --flake /etc/nixos#<hostname>
-$ nixos-rebuild switch --flake /etc/nixos#<hostname>
+$ pct exec <vmid> -- systemctl restart "gitea-runner-$(systemd-escape '<runner-name>')"
 ```
+
+Der Neustart ist streng genommen optional: Die Unit rotiert seit Schritt 11 mit `Restart = "on-failure"` und `RestartSec = 2` und würde die Datei beim nächsten automatischen Versuch von selbst finden. Explizit neu zu starten macht den Zeitpunkt nur nachvollziehbar.
 
 ## Dateien
 
-`<repo-root>/modules/runner/forgejo-runner.nix` (geändert, um eine Zeile erweitert):
+Im Repo ändert sich **keine** Datei – das ist der Punkt. Angelegt wird ausschließlich eine Datei auf dem Zielsystem, außerhalb von `<repo-root>` und außerhalb des Nix Store:
 
-```diff
---- a/modules/runner/forgejo-runner.nix
-+++ b/modules/runner/forgejo-runner.nix
-@@
-   services.gitea-actions-runner.instances."<runner-name>" = {
-     enable = true;
-     name = "<runner-name>";
-     url = "<forgejo-url>";
-+    # String, KEIN Nix-Pfad-Literal (./token.env würde die Datei in den
-+    # – world-readable! – Store kopieren, siehe Kapitel 10). Die Datei
-+    # muss auf dem Zielsystem bereits existieren, bevor der Dienst startet.
-+    tokenFile = "/etc/gitea-runner-token.env";
-     labels = [ /* … aus Schritt 11, hier unverändert … */ ];
-   };
+`/etc/gitea-runner-<runner-name>-token.env` (neu, nur im Container, `root:root`, Modus `600`):
+
+```bash
+TOKEN=<token-aus-weboberflaeche>
 ```
 
-`token` wäre die Alternative – landet damit aber wortwörtlich in der generierten Unit-Datei unter `/nix/store/…-gitea-runner-<runner-name>.service`, für jeden lokalen Nutzer lesbar.<sup>3</sup> `tokenFile` verweist stattdessen auf `EnvironmentFile=`; diese Datei liest der systemd-**Manager** (PID 1, root) unmittelbar vor `fork`/`exec`, **bevor** er auf den in `User = "gitea-runner"` (`DynamicUser = true`) angegebenen unprivilegierten Nutzer wechselt.<sup>4</sup> `chmod 600 root:root` genügt deshalb.
+Dass `tokenFile` in Schritt 11 als **String** und nicht als Nix-Pfad-Literal geschrieben wurde, ist dabei entscheidend: `./token.env` hätte die Datei beim Bauen in den – weltlesbaren – Store kopiert (Kapitel 10), genau das Gegenteil der Absicht. `token` wäre die Alternative – landet damit aber wortwörtlich in der generierten Unit-Datei unter `/nix/store/…-gitea-runner-<runner-name>.service`, für jeden lokalen Nutzer lesbar.<sup>3</sup> `tokenFile` verweist stattdessen auf `EnvironmentFile=`; diese Datei liest der systemd-**Manager** (PID 1, root) unmittelbar vor `fork`/`exec`, **bevor** er auf den in `User = "gitea-runner"` (`DynamicUser = true`) angegebenen unprivilegierten Nutzer wechselt.<sup>4</sup> `chmod 600 root:root` genügt deshalb.
 
 > 💡 **Nice to know:** Die systemd-Unit heißt nicht `gitea-runner-<runner-name>.service`. Nixpkgs baut den Namen über `escapeSystemdPath`,<sup>5</sup> und dieses Escaping maskiert einen literalen Bindestrich zu `\x2d` (in systemd-Unit-Namen für Pfadtrennung reserviert). Aus `ci-runner-01` wird real `gitea-runner-ci\x2drunner\x2d01.service` – nachvollziehbar mit `systemd-escape ci-runner-01`. Vor `systemctl status`/`journalctl -u` lohnt sich `systemd-escape "<runner-name>"`, statt den Namen zu raten.
 
@@ -72,15 +61,15 @@ $ nixos-rebuild switch --flake /etc/nixos#<hostname>
 
 ## Wenn's schiefgeht
 
-**Build bricht weiterhin mit der "not both"-Assertion ab:** `token` ist zusätzlich irgendwo gesetzt, oder `tokenFile` wird in einer anderen Moduldatei überschrieben. `modules/runner/*.nix` auf doppelte Zuweisungen prüfen.
+**Build bricht mit der "not both"-Assertion ab:** Zusätzlich zu `tokenFile` wurde irgendwo `token` gesetzt – etwa beim Übernehmen eines Beispiels aus dem Netz. `modules/runner/*.nix` auf doppelte Zuweisungen prüfen.
 
-**Unit startet nicht, `journalctl` meldet ein Problem beim Laden der Environment-Datei:** `/etc/gitea-runner-token.env` fehlt oder Pfad ist falsch – `EnvironmentFile=` erzwingt einen Fehlschlag, wenn die Datei fehlt oder unlesbar ist.<sup>4</sup> Mit `pct exec <vmid> -- ls -l /etc/gitea-runner-token.env` gegenprüfen.
+**Unit startet nicht, `journalctl` meldet ein Problem beim Laden der Environment-Datei:** Der Dateiname weicht vom in Schritt 11 konfigurierten `tokenFile`-Pfad ab (ein Tippfehler in `<runner-name>` genügt) – `EnvironmentFile=` erzwingt einen Fehlschlag, wenn die Datei fehlt oder unlesbar ist.<sup>4</sup> Mit `pct exec <vmid> -- ls -l /etc/gitea-runner-<runner-name>-token.env` gegenprüfen und mit dem Wert in `forgejo-runner.nix` vergleichen.
 
-**Unit startet, `ExecStartPre` (Registrierung) schlägt fehl, der Dienst rotiert ständig:** Meist ein ungültiges oder verbrauchtes Token. Neues Token erzeugen, `/etc/gitea-runner-token.env` ersetzen – der veränderte Inhalt zwingt beim nächsten Start automatisch zur Neuregistrierung.<sup>1</sup> Ein reiner `systemctl restart` **ohne** Token-Änderung registriert dagegen nicht neu, solange `.runner` existiert und Labels/Token unverändert sind – Absicht: Die Laufzeit-Authentifizierung nutzt danach ein bei der Registrierung ausgehandeltes, vom Registrierungs-Token verschiedenes Credential in `.runner`.
+**Unit startet, `ExecStartPre` (Registrierung) schlägt fehl, der Dienst rotiert ständig:** Meist ein ungültiges oder verbrauchtes Token. Neues Token erzeugen, `/etc/gitea-runner-<runner-name>-token.env` ersetzen – der veränderte Inhalt zwingt beim nächsten Start automatisch zur Neuregistrierung.<sup>1</sup> Ein reiner `systemctl restart` **ohne** Token-Änderung registriert dagegen nicht neu, solange `.runner` existiert und Labels/Token unverändert sind – Absicht: Die Laufzeit-Authentifizierung nutzt danach ein bei der Registrierung ausgehandeltes, vom Registrierungs-Token verschiedenes Credential in `.runner`.
 
 ## Rückweg
 
-`tokenFile`-Zeile aus `forgejo-runner.nix` entfernen, pushen, rebuilden – der Dienst stoppt. Das ändert nichts auf Forgejo-Seite: Der Eintrag bleibt sichtbar (als offline), bis er dort manuell gelöscht wird. Für einen sauberen Neuanfang zusätzlich `pct exec <vmid> -- rm -rf /var/lib/gitea-runner/<runner-name>` und `/etc/gitea-runner-token.env` löschen.
+Da im Repo nichts geändert wurde, genügt es, die Token-Datei wieder zu entfernen: `pct exec <vmid> -- rm /etc/gitea-runner-<runner-name>-token.env`, danach `systemctl restart` der Unit – der Dienst fällt in denselben `failed`-Zustand zurück, in dem Schritt 12 ihn hinterlassen hat. Das ändert nichts auf Forgejo-Seite: Der Eintrag bleibt dort sichtbar (als offline), bis er manuell gelöscht wird. Für einen sauberen Neuanfang zusätzlich `pct exec <vmid> -- rm -rf /var/lib/gitea-runner/<runner-name>`.
 
 ## Querverweis
 

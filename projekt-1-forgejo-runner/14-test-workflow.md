@@ -17,12 +17,12 @@ Schritt 13 ist abgeschlossen: `<runner-name>` erscheint online. Ein Test-Reposit
 
 **1. Verzeichnis wählen.** Forgejo sucht zuerst unter `.forgejo/workflows/`; existiert dieses Verzeichnis nicht, fällt es auf `.github/workflows/` zurück – sind **beide** vorhanden, führt Forgejo Workflows aus beiden aus (anders als GitHub, das `.forgejo/workflows` ignoriert).<sup>1</sup> Für ein Forgejo-natives Repo gehört der Workflow deshalb nach `.forgejo/workflows/`.
 
-**2. Labels gegenprüfen.** `runs-on:` muss exakt den Namensteil **vor** dem Doppelpunkt eines der in `forgejo-runner.nix` (Schritt 11) registrierten Labels treffen (Groß-/Kleinschreibung zählt) – z. B. macht ein Label `debian-trixie:docker://…` den Wert `runs-on: debian-trixie` gültig, `debian-latest` dagegen nicht. Die registrierten Labels stehen sowohl im Nix-Modul als auch (nach Schritt 13) in der Forgejo-Runner-Übersicht.
+**2. Labels gegenprüfen.** `runs-on:` muss exakt den Namensteil **vor** dem ersten Doppelpunkt eines der in `forgejo-runner.nix` (Schritt 11) registrierten Labels treffen (Groß-/Kleinschreibung zählt). Dort steht `ubuntu-latest:docker://node:20-bookworm`, gültig ist also genau `runs-on: ubuntu-latest` – `ubuntu-24.04` oder `node-20` wären es nicht. Die registrierten Labels stehen sowohl im Nix-Modul als auch (nach Schritt 13) in der Forgejo-Runner-Übersicht.
 
 **3. Bei einem `:docker:`-Schema-Label das Image lokal verfügbar machen.** Dieses Projekt läuft in einem rein internen Netz ohne öffentlichen Zugriff (Projektrahmen, `00-uebersicht.md`). Ein Image direkt von einer öffentlichen Registry zu ziehen, scheitert dort ohne Weiteres. Sofern keine interne Registry/Spiegelung bereitsteht, das Image vorab manuell cachen:
 
 ```console
-$ pct exec <vmid> -- podman pull docker.io/library/debian:trixie-slim
+$ pct exec <vmid> -- podman pull docker.io/library/node:20-bookworm
 ```
 
 **4. Workflow-Datei anlegen** (siehe "Dateien"), committen, ins Test-Repository pushen.
@@ -42,23 +42,26 @@ on:
 
 jobs:
   hello:
-    runs-on: debian-trixie
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: |
           echo "Runner-Hostname im Job: $(hostname)"
+          echo "Distribution im Job:"
+          cat /etc/os-release
           echo "Repo-Inhalt nach Checkout:"
           ls -la
 ```
 
 `actions/checkout@v4` wird nicht direkt von GitHub geladen: Fehlt eine vollständige URL, hängt Forgejo den in `DEFAULT_ACTIONS_URL` konfigurierten Präfix davor (Default laut Doku `https://data.forgejo.org`, vom Instanz-Admin änderbar, z. B. auf `https://github.com` oder eine selbst gespiegelte Quelle).<sup>2</sup> Ob das innerhalb des internen Netzes dieses Projekts erreichbar ist, hängt von der Konfiguration der – laut Projektrahmen bereits bestehenden – Forgejo-Instanz ab, nicht von diesem Runner.
 
-> 💡 **Nice to know – die häufigste Verwirrung:** Bei einem `:docker:`-Schema-Label läuft der Job **innerhalb des angegebenen Container-Images**, nicht in der NixOS-Umgebung des Runner-Hosts. `$(hostname)`, installierte Pakete, sogar die Linux-Distribution im Job sind die des Images (hier Debian, nicht NixOS) – nichts aus `environment.systemPackages` des Hosts ist automatisch verfügbar. Nur bei einem `:host`-Schema-Label (z. B. `irgendwas:host`) läuft der Job direkt im Dateisystem des Runner-Containers; dann – und nur dann – zählt `services.gitea-actions-runner.instances.<runner-name>.hostPackages`, das laut Nixpkgs-Quellcode standardmäßig `bash`, `coreutils`, `curl`, `gawk`, `gitMinimal`, `gnused`, `nodejs` und `wget` auf den `PATH` des Jobs legt – alles andere muss dort explizit ergänzt werden.<sup>3</sup>
+> 💡 **Nice to know – die häufigste Verwirrung:** Bei einem `:docker:`-Schema-Label läuft der Job **innerhalb des angegebenen Container-Images**, nicht in der NixOS-Umgebung des Runner-Hosts. Das Label ist dabei nur ein frei gewählter Name, keine Zusage über den Inhalt: Hier heißt es `ubuntu-latest`, weil aus GitHub übernommene Workflows genau diesen Wert erwarten – tatsächlich startet aber `node:20-bookworm`, also Debian. Genau deshalb gibt `cat /etc/os-release` im Job weder Ubuntu noch NixOS aus, sondern Debian GNU/Linux 12 (bookworm). `$(hostname)`, installierte Pakete und die Distribution sind die des Images; nichts aus `environment.systemPackages` des Hosts ist automatisch verfügbar. Nur bei einem `:host`-Schema-Label (z. B. `irgendwas:host`) läuft der Job direkt im Dateisystem des Runner-Containers; dann – und nur dann – zählt `services.gitea-actions-runner.instances.<runner-name>.hostPackages`, das laut Nixpkgs-Quellcode standardmäßig `bash`, `coreutils`, `curl`, `gawk`, `gitMinimal`, `gnused`, `nodejs` und `wget` auf den `PATH` des Jobs legt – alles andere muss dort explizit ergänzt werden.<sup>3</sup>
 
 ## Prüfen
 
 - Im Test-Repository unter "Actions" zeigt der Lauf von `runner-test` einen grünen/erfolgreichen Status.
 - Das Job-Log enthält die Zeile `Runner-Hostname im Job: …` sowie eine Verzeichnisliste, die tatsächlich den Inhalt des Test-Repos zeigt – Beleg, dass `actions/checkout` erfolgreich aufgelöst und ausgeführt wurde.
+- Die `os-release`-Ausgabe im Log nennt Debian, nicht NixOS und nicht Ubuntu – der Nachweis, dass der Job im Image lief und das Label nur ein Name ist.
 - `pct exec <vmid> -- journalctl -u "gitea-runner-$(systemd-escape '<runner-name>')" --since -10m` zeigt Aktivität während des Laufs.
 
 ## Wenn's schiefgeht
