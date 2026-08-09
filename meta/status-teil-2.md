@@ -11,23 +11,27 @@ Ordner: `projekt-1-forgejo-runner/`
 
 - [x] 0. Architekturüberblick und Platzhaltertabelle stehen (Hostname, IP, LDAP-Domain, Forgejo-URL, Admin-User-Schema). → `00-uebersicht.md`
 - [x] 1. Der LXC-Container ist über ein versioniertes Skript (feste `pct create`-Parameter) angelegt, nicht per Ad-hoc-Eingabe. → `01-container-bootstrap.md`
-- [ ] 2. Ein Flake-Grundgerüst mit `configuration.nix` und gesetztem `hostName` baut erfolgreich (per `nixos-rebuild build` von innen getestet, dann `switch`).
-- [ ] 3. Der lokale Nutzer `f-local-admin-<hostname>` existiert, ausschließlich mit hinterlegtem SSH-Key, kein Passwort gesetzt.
-- [ ] 4. `security.sudo.extraRules` gewährt ausschließlich diesem Nutzer passwortloses sudo.
-- [ ] 5. SSH läuft auf Port 40, `PermitRootLogin` ist deaktiviert. (Inkl. Klärung `/etc/services`, siehe `ENTSCHEIDUNGEN.md`.)
-- [ ] 6. Geklärt und dokumentiert ist, ob `/etc/services` unter NixOS überhaupt manuell angepasst werden muss. (Kann mit Schritt 5 zusammengelegt werden, wenn sich das beim Schreiben anbietet.)
-- [ ] 7. `fail2ban` ist aktiv und schützt den SSH-Dienst auf dem neuen Port.
-- [ ] 8. `sssd` bindet den Container an das bestehende LDAP an, ein LDAP-Testnutzer kann sich per Passwort einloggen.
-- [ ] 9. Die Firewall lässt ausschließlich Port 40 (und was der Runner sonst braucht) herein.
-- [ ] 10. `virtualisation.podman` (oder docker) ist aktiv, damit der Runner Container-Jobs ausführen kann.
-- [ ] 11. `services.gitea-actions-runner` ist mit `package = pkgs.forgejo-runner` konfiguriert.
-- [ ] 12. Eine `.env`-Datei mit Klartext-Werten ist angelegt und vom Runner eingebunden.
-- [ ] 13. Der Runner ist mit einem in der Forgejo-Weboberfläche erzeugten Token registriert und online.
-- [ ] 14. Ein Test-Workflow läuft erfolgreich über den neuen Runner durch.
-- [ ] 15. Exkurs: dieselbe `.env` liegt stattdessen sops-age-verschlüsselt vor, der Unterschied zur Klartext-Variante ist erklärt.
+- [x] 2. Ein Flake-Grundgerüst mit `configuration.nix` und gesetztem `hostName` baut erfolgreich (per `nixos-rebuild build` von innen getestet, dann `switch`). → `02-flake-grundgeruest.md`
+- [x] 3. Der lokale Nutzer `f-local-admin-<hostname>` existiert, ausschließlich mit hinterlegtem SSH-Key, kein Passwort gesetzt. → `03-lokaler-admin.md`
+- [x] 4. `security.sudo.extraRules` gewährt ausschließlich diesem Nutzer passwortloses sudo. → `04-sudo.md`
+- [x] 5. SSH läuft auf Port 40, `PermitRootLogin` ist deaktiviert. → `05-ssh-haertung.md`
+- [x] 6. Geklärt und dokumentiert ist, ob `/etc/services` unter NixOS überhaupt manuell angepasst werden muss. **Nicht** mit Schritt 5 zusammengelegt, damit Datei- und Schrittnummern 1:1 bleiben. Ergebnis: nein, belegt. → `06-etc-services.md`
+- [x] 7. `fail2ban` ist aktiv und schützt den SSH-Dienst auf dem neuen Port. → `07-fail2ban.md`
+- [x] 8. `sssd` bindet den Container an das bestehende LDAP an, ein LDAP-Testnutzer kann sich per Passwort einloggen. → `08-ldap-sssd.md`
+- [x] 9. Die Firewall lässt ausschließlich Port 40 (und was der Runner sonst braucht) herein. → `09-firewall.md`
+- [x] 10. `virtualisation.podman` (oder docker) ist aktiv, damit der Runner Container-Jobs ausführen kann. → `10-container-runtime.md`
+- [x] 11. `services.gitea-actions-runner` ist mit `package = pkgs.forgejo-runner` konfiguriert. → `11-forgejo-runner.md`
+- [x] 12. Eine `.env`-Datei mit Klartext-Werten ist angelegt und vom Runner eingebunden. → `12-env-datei.md`
+- [x] 13. Der Runner ist mit einem in der Forgejo-Weboberfläche erzeugten Token registriert und online. → `13-runner-registrieren.md`
+- [x] 14. Ein Test-Workflow läuft erfolgreich über den neuen Runner durch. → `14-test-workflow.md`
+- [x] 15. Exkurs: dieselbe `.env` liegt stattdessen sops-age-verschlüsselt vor, der Unterschied zur Klartext-Variante ist erklärt. → `15-exkurs-sops-age.md`
 - [ ] 16. Projektabschluss: vollständiger Repo-Baum, gesammelte Endkonfiguration, 3–5 Ausbaustufen, Teardown-Anleitung stehen.
 
-**Zuletzt erreichter Zustand:** Container `<vmid>` läuft, minimal per `pct enter` erreichbar, noch keine NixOS-Konfiguration über das Bootstrap-Modul hinaus angewendet.
+**Zuletzt erreichter Zustand:** Schritte 1–15 sind geschrieben. Der beschriebene Zielzustand: Container `<vmid>` läuft mit statischer `<ip>`, gehärteter Baseline (Key-only-Admin mit passwortlosem sudo, SSH auf Port 40, fail2ban, LDAP per sssd, Firewall nur Port 40 eingehend) und einem bei `<forgejo-url>` registrierten Forgejo-Runner, der Container-Jobs über Podman ausführt. Offen ist nur noch der Projektabschluss.
+
+**Beim Schreiben gefundene und behobene Sachfehler** (relevant für Projekt 2/3, deshalb hier notiert):
+- `--ostype unmanaged` + Nixpkgs-Default `proxmoxLXC.manageNetwork = false` ergaben einen Container ohne IP und ohne DNS; `bootstrap.nix` in Schritt 1 wurde deshalb nachträglich um `manageNetwork = true` und `useDHCP = true` ergänzt. Details in `ENTSCHEIDUNGEN.md`.
+- Schritt 13 hatte einen zweiten, abweichenden Token-Pfad eingeführt, obwohl Schritt 11 `tokenFile` bereits setzt; Schritt 14 verlangte ein Label, das Schritt 11 nie registriert. Beides angeglichen.
 
 ## Projekt 2: Vaultwarden mit Reverse Proxy, Backup & Restore
 
