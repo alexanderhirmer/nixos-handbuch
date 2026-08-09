@@ -56,7 +56,9 @@ RUNNER_SITE=rz-intern
 TZ=Europe/Berlin
 ```
 
-Im Repo liegt davon nur die verschlüsselte Fassung. Das `dotenv`-Format verschlüsselt dabei ausschließlich die *Werte* – die Variablennamen bleiben im Klartext lesbar, wodurch ein `git diff` weiterhin zeigt, *welcher* Eintrag sich geändert hat, ohne dessen Inhalt preiszugeben. Bei `format = "binary"` wäre die ganze Datei ein undurchsichtiger Block; das wäre hier ebenfalls möglich (`key` wird dann ignoriert), kostet aber genau diese Lesbarkeit.
+Im Repo liegt davon nur die verschlüsselte Fassung. Das `dotenv`-Format verschlüsselt dabei ausschließlich die *Werte* – die Variablennamen bleiben im Klartext lesbar, wodurch ein `git diff` weiterhin zeigt, *welcher* Eintrag sich geändert hat, ohne dessen Inhalt preiszugeben. Bei `format = "binary"` wäre die ganze Datei ein undurchsichtiger Block; möglich wäre auch das, es kostet nur genau diese Lesbarkeit.
+
+> 💡 **Nice to know:** Die Options-Beschreibung von `sops.secrets.<name>.key` legt eine Falle aus: Sie sagt, der Schlüssel werde "in der sops-Datei nachgeschlagen", der Default sei der Name des Secrets, und `""` bedeute "whole file" – man könnte also meinen, hier müsse zwingend `key = "";` stehen, sonst suche sops-nix einen Eintrag namens `runner-env` *innerhalb* der Datei. Für `dotenv` stimmt das nicht: Im Go-Quellcode landet `dotenv` – zusammen mit `binary` und `ini` – in dem Zweig, der immer den gesamten entschlüsselten Inhalt übernimmt, und die Schlüsselprüfung überspringt diese drei Formate ausdrücklich. `key` ist hier also wirkungslos, nicht Pflicht. Nachgeschlagen wird nur bei `yaml` und `json`.<sup>2</sup>
 
 `<repo-root>/modules/runner/forgejo-runner.nix` (geändert):
 
@@ -71,11 +73,6 @@ Im Repo liegt davon nur die verschlüsselte Fassung. Das `dotenv`-Format verschl
 +  sops.secrets."runner-env" = {
 +    sopsFile = ../../secrets/runner.env;
 +    format = "dotenv";
-+    # Pflicht hier: `key` defaultet auf den Namen des Secrets, sops-nix
-+    # wuerde also einen Eintrag `runner-env` INNERHALB der Datei suchen.
-+    # "" bedeutet laut Options-Beschreibung "whole file" – und genau die
-+    # ganze Datei braucht systemd als EnvironmentFile.
-+    key = "";
 +  };
 +
    services.gitea-actions-runner = {
@@ -130,8 +127,6 @@ Im Repo liegt davon nur die verschlüsselte Fassung. Das `dotenv`-Format verschl
 
 **`Failed to get the data key required to decrypt the SOPS file.`** – dieselbe Meldung wie in Kapitel 10: `sops.age.sshKeyPaths` zeigt auf den falschen Host-Key, oder dessen Public Key fehlt in `.sops.yaml`. Mit dem Befehl aus Schritt 2 gegenprüfen und `sops updatekeys secrets/runner.env` nach einer Korrektur.
 
-**Der Dienst startet, aber `/run/secrets/runner-env` ist leer oder die Aktivierung meldet, der Schlüssel sei in der sops-Datei nicht gefunden worden:** `key = "";` fehlt. Ohne diese Zeile sucht sops-nix laut Options-Beschreibung einen Eintrag mit dem *Namen des Secrets* (`runner-env`) innerhalb der Datei – den es dort nicht gibt, weil die Datei `RUNNER_ENVIRONMENT`/`RUNNER_SITE`/`TZ` enthält.<sup>2</sup> Fix: `key = "";` ergänzen oder auf `format = "binary"` wechseln, wo `key` ignoriert wird.
-
 **Build bricht mit `error: undefined variable 'config'` ab:** Der Funktionskopf von `forgejo-runner.nix` wurde nicht um `config` erweitert (Schritt 12 hatte dort bereits `utils` ergänzt, jetzt kommt `config` hinzu) – `...` allein bindet keine benannten Modulargumente. Fix: Kopfzeile wie im Diff korrigieren.
 
 ## Rückweg
@@ -146,4 +141,4 @@ sops-nix-Grundlagen: Teil I, Kapitel 10. SSH-Host-Key: Schritt 5. Klartext-Gegen
 
 <sup>1</sup> Nix-Pfad-Literale vs. Strings und Store-Kopie: Teil I, Kapitel 3 ("Nix als Sprache") und Kapitel 2 ("Das Nix-Modell"). `/run/secrets/…` als `tmpfs`-Ziel von sops-nix: [sops-nix – GitHub](https://github.com/Mic92/sops-nix), bereits in Kapitel 10 zitiert.
 
-<sup>2</sup> Quelle: sops-nix-Quellcode, `modules/sops/default.nix`, Option `sops.secrets.<name>.key`: `default = if cfg.defaultSopsKey != null then cfg.defaultSopsKey else config._module.args.name;`, Beschreibung "Key used to lookup in the sops file. […] This option is ignored if format is binary. \"\" means whole file." https://github.com/Mic92/sops-nix/blob/master/modules/sops/default.nix
+<sup>2</sup> Quelle: sops-nix-Quellcode. Options-Beschreibung in `modules/sops/default.nix` (`key`: Default `config._module.args.name`, "This option is ignored if format is binary. \"\" means whole file."), tatsächliche Umsetzung in `pkgs/sops-install-secrets/main.go`: In `decryptSecret` bekommt `case Binary, Dotenv, Ini:` immer `sourceFile.binary`, also die ganze Datei, während nur `Yaml`/`JSON` über `recurseSecretKey` gehen; `validateSopsFile` prüft den Schlüssel nur, wenn `s.Format != Binary && s.Format != Dotenv && s.Format != Ini`. https://github.com/Mic92/sops-nix/blob/master/pkgs/sops-install-secrets/main.go
