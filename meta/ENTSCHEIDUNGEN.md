@@ -83,6 +83,58 @@ zugehörigen Schritt verlinkt):
   gepflegt wird — das ist eine vorläufige Einschätzung, muss im
   entsprechenden Schritt noch sauber mit Quelle belegt werden).
 
+## Projekt 1 — Dateikontrakt (verbindlich ab Schritt 2)
+
+Damit die Schritte 2–16 zusammenpassen (und Projekt 2/3 die Baseline
+übernehmen können), steht die Repo-Struktur des Lesers vorab fest.
+Kein Schritt erfindet eigene Pfade oder Modulnamen.
+
+```
+<repo-root>/
+├── flake.nix                        Schritt 2
+├── flake.lock                       Schritt 2 (erzeugt, gepinnt)
+├── hosts/
+│   └── <hostname>/
+│       ├── bootstrap.nix            Schritt 1 (nur fürs Template)
+│       ├── create-container.sh      Schritt 1
+│       └── configuration.nix        Schritt 2 (Host-Einstieg)
+└── modules/
+    ├── baseline/
+    │   ├── default.nix              Schritt 3 (Sammel-Import, wächst per Diff)
+    │   ├── users.nix                Schritt 3
+    │   ├── sudo.nix                 Schritt 4
+    │   ├── ssh.nix                  Schritt 5 (+ Klärung Schritt 6)
+    │   ├── fail2ban.nix             Schritt 7
+    │   ├── ldap.nix                 Schritt 8
+    │   └── firewall.nix             Schritt 9
+    └── runner/
+        ├── default.nix              Schritt 10 (Sammel-Import)
+        ├── container-runtime.nix    Schritt 10
+        ├── forgejo-runner.nix       Schritt 11
+        └── runner.env               Schritt 12 (Klartext-Variante)
+```
+
+Regeln dazu:
+
+- `hosts/<hostname>/configuration.nix` importiert `../../modules/baseline`
+  und (ab Schritt 10) `../../modules/runner`; die beiden `default.nix`
+  sammeln ihre Geschwisterdateien in `imports`. Jeder Schritt ab 4 legt
+  **eine** neue Moduldatei an und ergänzt genau eine Zeile in der
+  passenden `default.nix` (Diff-Stil).
+- Im Container ist dasselbe Repo unter `/etc/nixos` ausgecheckt.
+  Rebuild-Kommando durchgängig:
+  `nixos-rebuild switch --flake /etc/nixos#<hostname>`
+  (bzw. `build` statt `switch` zum Testen).
+- Instanzname des Runners in
+  `services.gitea-actions-runner.instances.<runner-name>` ist der
+  Platzhalter `<runner-name>` aus der Tabelle.
+- Der sops-age-Exkurs (Schritt 15) ersetzt `modules/runner/runner.env`
+  nicht, sondern stellt ihm `secrets/runner.env` (verschlüsselt) plus
+  `.sops.yaml` unter `<repo-root>/` gegenüber.
+- Dateinamen der Buchkapitel = Schrittnummer: `NN-<slug>.md` unter
+  `projekt-1-forgejo-runner/`, `weight: NN`. Schritt 6 bleibt ein
+  eigener (kurzer) Schritt, damit Datei- und Schrittnummern 1:1 bleiben.
+
 ## Projekt 2 (von der KI vorgeschlagen, freigegeben)
 
 Hauptthema: Vaultwarden (Bitwarden-kompatibler Passwort-Manager) auf
