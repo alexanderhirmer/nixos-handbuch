@@ -42,14 +42,21 @@ creation_rules:
   - path_regex: secrets/.*\.env$
     key_groups:
       - age:
-          - age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqsyzhk3l
+          # Hier die tatsaechliche ssh-to-age-Ausgabe aus Punkt 2 einsetzen.
+          # Ein age-Empfaenger beginnt mit "age1"; ein Beispielwert waere
+          # hier gefaehrlich, weil er sich kommentarlos kopieren liesse.
+          - age1...
 ```
 
-`<repo-root>/secrets/runner.env` (neu, verschlüsselt – Inhalt im Editor beim `sops`-Aufruf oben):
+`<repo-root>/secrets/runner.env` (neu, verschlüsselt – der Klartext, den du beim `sops`-Aufruf oben in den Editor tippst, ist derselbe wie in Schritt 12):
 
+```bash
+RUNNER_ENVIRONMENT=produktion
+RUNNER_SITE=rz-intern
+TZ=Europe/Berlin
 ```
-FORGEJO_RUNNER_LOG_LEVEL=info
-```
+
+Im Repo liegt davon nur die verschlüsselte Fassung. Das `dotenv`-Format verschlüsselt dabei ausschließlich die *Werte* – die Variablennamen bleiben im Klartext lesbar, wodurch ein `git diff` weiterhin zeigt, *welcher* Eintrag sich geändert hat, ohne dessen Inhalt preiszugeben. Bei `format = "binary"` wäre die ganze Datei ein undurchsichtiger Block; das wäre hier ebenfalls möglich (`key` wird dann ignoriert), kostet aber genau diese Lesbarkeit.
 
 `<repo-root>/modules/runner/forgejo-runner.nix` (geändert):
 
@@ -64,6 +71,11 @@ FORGEJO_RUNNER_LOG_LEVEL=info
 +  sops.secrets."runner-env" = {
 +    sopsFile = ../../secrets/runner.env;
 +    format = "dotenv";
++    # Pflicht hier: `key` defaultet auf den Namen des Secrets, sops-nix
++    # wuerde also einen Eintrag `runner-env` INNERHALB der Datei suchen.
++    # "" bedeutet laut Options-Beschreibung "whole file" – und genau die
++    # ganze Datei braucht systemd als EnvironmentFile.
++    key = "";
 +  };
 +
    services.gitea-actions-runner = {
@@ -109,19 +121,22 @@ FORGEJO_RUNNER_LOG_LEVEL=info
 
 ## Prüfen
 
-- `pct exec <vmid> -- cat /run/secrets/runner-env` zeigt denselben Klartext, der beim `sops`-Aufruf eingegeben wurde.
-- `pct exec <vmid> -- grep -r "FORGEJO_RUNNER_LOG_LEVEL" /nix/store` liefert **keinen** Treffer – Kontrast zu Schritt 12, wo `runner.env` im Store selbst durchsuchbar ist.
-- Der Runner-Dienst (Schritt 13) bleibt aktiv; `journalctl` zeigt keinen neuen Fehler nach dem Umstellen von `env_file`.
+- `pct exec <vmid> -- cat /run/secrets/runner-env` zeigt denselben Klartext, der beim `sops`-Aufruf eingegeben wurde – und `findmnt /run/secrets` weist das Ziel als `ramfs`/`tmpfs` aus, nicht als Teil des Stores.
+- `pct exec <vmid> -- grep -rl "RUNNER_SITE" /run/current-system` liefert **keinen** Treffer mehr: Im aktiven System wird nur noch der Pfad `/run/secrets/runner-env` referenziert, nicht der Inhalt. Ehrlicherweise: Der *alte* Store-Pfad aus Schritt 12 liegt weiterhin unter `/nix/store` und ist dort auch weiterhin lesbar – er ist nur nicht mehr referenziert und verschwindet erst mit `nix-collect-garbage`. Der Punkt des Exkurses ist, dass die neue Fassung dort **nie** ankommt, nicht dass die alte rückwirkend verschwindet.
+- `pct exec <vmid> -- systemctl cat 'gitea-runner-*'` zeigt im `[Service]`-Abschnitt die `EnvironmentFile=`-Zeile aus Schritt 13 unverändert (`/etc/gitea-runner-<runner-name>-token.env`) sowie eine zweite, die jetzt auf `/run/secrets/runner-env` zeigt statt auf einen `/nix/store/…`-Pfad.
+- Der Runner-Dienst (Schritt 13) bleibt aktiv; `journalctl` zeigt keinen neuen Fehler nach der Umstellung.
 
 ## Wenn's schiefgeht
 
 **`Failed to get the data key required to decrypt the SOPS file.`** – dieselbe Meldung wie in Kapitel 10: `sops.age.sshKeyPaths` zeigt auf den falschen Host-Key, oder dessen Public Key fehlt in `.sops.yaml`. Mit dem Befehl aus Schritt 2 gegenprüfen und `sops updatekeys secrets/runner.env` nach einer Korrektur.
 
-**`/run/secrets/runner-env` existiert, `journalctl` zeigt trotzdem "Permission denied" beim Lesen:** `mode` wurde vergessen oder auf den (Default-)Wert `0400` zurückgesetzt – für den DynamicUser-Dienst nicht lesbar, siehe Kommentar oben.
+**Der Dienst startet, aber `/run/secrets/runner-env` ist leer oder die Aktivierung meldet, der Schlüssel sei in der sops-Datei nicht gefunden worden:** `key = "";` fehlt. Ohne diese Zeile sucht sops-nix laut Options-Beschreibung einen Eintrag mit dem *Namen des Secrets* (`runner-env`) innerhalb der Datei – den es dort nicht gibt, weil die Datei `RUNNER_ENVIRONMENT`/`RUNNER_SITE`/`TZ` enthält.<sup>2</sup> Fix: `key = "";` ergänzen oder auf `format = "binary"` wechseln, wo `key` ignoriert wird.
+
+**Build bricht mit `error: undefined variable 'config'` ab:** Der Funktionskopf von `forgejo-runner.nix` wurde nicht um `config` erweitert (Schritt 12 hatte dort bereits `utils` ergänzt, jetzt kommt `config` hinzu) – `...` allein bindet keine benannten Modulargumente. Fix: Kopfzeile wie im Diff korrigieren.
 
 ## Rückweg
 
-`env_file` in `forgejo-runner.nix` zurück auf `./runner.env` setzen, die `sops.*`-Zeilen entfernen, `sops-nix.nixosModules.sops` aus `flake.nix` streichen, rebuilden. `secrets/runner.env` und `.sops.yaml` können gefahrlos im Repo bleiben – verschlüsselt, ohne Store-Bezug.
+Die `EnvironmentFile`-Liste in `forgejo-runner.nix` zurück auf `[ "${./runner.env}" ]` setzen, die `sops.*`-Zeilen und das ergänzte `config`-Argument entfernen, `sops-nix.nixosModules.sops` aus `flake.nix` streichen, rebuilden. `secrets/runner.env` und `.sops.yaml` können gefahrlos im Repo bleiben – verschlüsselt, ohne Store-Bezug.
 
 ## Querverweis
 
@@ -130,3 +145,5 @@ sops-nix-Grundlagen: Teil I, Kapitel 10. SSH-Host-Key: Schritt 5. Klartext-Gegen
 ---
 
 <sup>1</sup> Nix-Pfad-Literale vs. Strings und Store-Kopie: Teil I, Kapitel 3 ("Nix als Sprache") und Kapitel 2 ("Das Nix-Modell"). `/run/secrets/…` als `tmpfs`-Ziel von sops-nix: [sops-nix – GitHub](https://github.com/Mic92/sops-nix), bereits in Kapitel 10 zitiert.
+
+<sup>2</sup> Quelle: sops-nix-Quellcode, `modules/sops/default.nix`, Option `sops.secrets.<name>.key`: `default = if cfg.defaultSopsKey != null then cfg.defaultSopsKey else config._module.args.name;`, Beschreibung "Key used to lookup in the sops file. […] This option is ignored if format is binary. \"\" means whole file." https://github.com/Mic92/sops-nix/blob/master/modules/sops/default.nix
