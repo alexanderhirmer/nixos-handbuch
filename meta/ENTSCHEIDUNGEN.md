@@ -34,6 +34,39 @@ nicht raten.
 - Diese Struktur ist ab Projekt 1 etabliert und wird in Projekt 3 auf
   mehrere Hosts erweitert (nicht neu erfinden).
 
+## Secrets: vorhandener age-Schlüssel (Nutzer-Vorgabe, projektübergreifend)
+
+Der Nutzer besitzt bereits einen age private key und verwendet diesen
+weiter. **In keinem Projekt wird ein age-Schlüssel erzeugt** — weder per
+`age-keygen` noch per `sops.age.generateKey = true` (dessen Default
+`false` passt ohnehin: "the key must already be present at the specified
+location"). Teil I, Kapitel 10 bleibt davon unberührt (dort wird der
+Mechanismus allgemein erklärt); ab Teil II gilt diese Vorgabe.
+
+Platzhalter dafür stehen in `projekt-1-forgejo-runner/00-uebersicht.md`:
+`<age-recipient>` (öffentlicher Empfänger) und `<age-key-file>` (private
+Schlüsseldatei auf der Workstation). Keine erfundenen `age1...`-Werte in
+Beispielen — ein kopierfähiger Fake-Empfänger wäre eine Fehlerquelle.
+
+Zwei Varianten, beide vom Nutzer freigegeben:
+
+- **Hauptweg (Projekt 1, Schritt 15): ein Schlüssel für alles.** Der
+  vorhandene Key ist einziger Empfänger in `.sops.yaml` und wird auf den
+  Host ausgerollt, dort genutzt über `sops.age.keyFile`, dazu
+  `generateKey = false` und `sshKeyPaths = [ ]` (sonst hängt sops-nix per
+  Default zusätzlich die ed25519-Host-Keys als Identität ein).
+  Preis: Der private Schlüssel liegt auf jedem Zielsystem.
+- **Variante: getrennte Rollen.** Der Key bleibt Admin-/Recovery-
+  Schlüssel auf der Workstation, der Host entschlüsselt über eine aus
+  seinem SSH-Host-Key abgeleitete Identität (`ssh-to-age` rechnet nur um,
+  erzeugt kein neues Schlüsselmaterial). Preis: zwei Empfänger und
+  `sops updatekeys` nach jedem Neuaufsetzen eines Hosts.
+
+**Für Projekt 2 und 3 ist die getrennte Variante der Zielzustand** — dort
+gibt es mehrere Hosts, und ein Schlüssel, der auf allen liegt, hebt die
+Trennung zwischen ihnen auf. Schritt 15 erklärt beide Wege bereits, die
+Folgeprojekte können darauf verweisen statt neu herzuleiten.
+
 ## Projekt 1 (Forgejo-Runner-LXC) — feststehende Werte
 
 Siehe `projekt-1-forgejo-runner/00-uebersicht.md` für die vollständige

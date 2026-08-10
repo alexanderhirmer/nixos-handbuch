@@ -42,7 +42,7 @@ Ordner: `projekt-2-vaultwarden/` (noch nicht angelegt)
 - [ ] 2. Beide VMs sind über eine disko-Konfiguration deklarativ partitioniert und installiert.
 - [ ] 3. Ein Flake mit zwei `nixosConfigurations` und einem gemeinsamen Baseline-Modul baut für beide Hosts.
 - [ ] 4. Eine private Root-CA signiert die SSH-Host-Zertifikate beider Hosts (Nebenrolle).
-- [ ] 5. sops-age ist mit je einem Host-Key eingerichtet, `.sops.yaml` verweist auf beide (Nebenrolle).
+- [ ] 5. sops-age ist mit je einem Host-Key eingerichtet, `.sops.yaml` verweist auf beide (Nebenrolle). **Kein Schlüssel wird erzeugt** — der vorhandene age-Key des Nutzers ist Admin-/Recovery-Empfänger, die Hosts entschlüsseln über ihre SSH-Host-Key-Identität (getrennte Variante aus Projekt 1, Schritt 15; siehe `ENTSCHEIDUNGEN.md`).
 - [ ] 6. Postgres läuft auf dem DB-Host, deklarativ konfiguriert.
 - [ ] 7. Die DB-Zugangsdaten liegen als sops-Secret vor, nicht im Klartext.
 - [ ] 8. Vaultwarden läuft auf dem App-Host und verbindet sich über das Secret mit der DB.
@@ -71,7 +71,7 @@ Ordner: `projekt-3-fleet/` (noch nicht angelegt)
 - [ ] 7. Prometheus läuft deklarativ auf dem Monitoring-Knoten.
 - [ ] 8. `node-exporter` läuft auf allen Knoten über ein gemeinsames Modul.
 - [ ] 9. Grafana zeigt ein Grundgerüst-Dashboard mit Daten aller Knoten.
-- [ ] 10. sops-age ist auf mehrere Empfänger-Hosts erweitert — Unterschied zu Projekt 2: mehrere statt zwei Ziele.
+- [ ] 10. sops-age ist auf mehrere Empfänger-Hosts erweitert — Unterschied zu Projekt 2: mehrere statt zwei Ziele. Auch hier wird kein Schlüssel erzeugt (siehe `ENTSCHEIDUNGEN.md`); mit jedem zusätzlichen Host kommt ein Empfänger dazu, was `sops updatekeys` zur Routine macht — der Punkt, an dem sich die getrennte Variante gegenüber "ein Schlüssel für alles" auszahlt.
 - [ ] 11. Eine CI-Pipeline baut jede Host-Konfiguration vor einem Merge und bricht bei Fehlern ab.
 - [ ] 12. Nach einem Merge auf `main` rollt dieselbe Pipeline die Änderung automatisch auf die Flotte aus.
 - [ ] 13. Ein weiterer Knoten ist allein durch Repo-Eintrag plus `nixos-anywhere`-Lauf hinzugefügt, als Reproduzierbarkeits-Nachweis.

@@ -35,6 +35,10 @@ Diese Werte werden ab jetzt konsequent verwendet – ersetze sie 1:1 durch deine
 | `<ssh-port>` | SSH-Port | `40` |
 | `<vmid>` | Proxmox-Container-ID | `201` |
 | `<repo-root>` | Wurzel deines eigenen NixOS-Infrastruktur-Repos (nicht dieses Buch-Repo) | `~/nixos-infra` |
+| `<age-recipient>` | Öffentlicher age-Empfänger deines **bereits vorhandenen** Schlüssels (beginnt mit `age1`) | – |
+| `<age-key-file>` | Pfad zur privaten age-Schlüsseldatei auf deiner Workstation | `~/.config/sops/age/keys.txt` |
+
+Die beiden `age`-Platzhalter werden erst im Exkurs (Schritt 15) gebraucht. Dieses Projekt setzt voraus, dass du bereits einen age-Schlüssel besitzt und weiterverwendest – es wird an keiner Stelle einer erzeugt.
 
 Dateien für diese Maschine landen unter `<repo-root>/hosts/<hostname>/` – dieselbe Struktur wird in Projekt 3 auf mehrere Hosts erweitert.
 
