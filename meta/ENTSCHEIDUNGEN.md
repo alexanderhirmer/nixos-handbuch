@@ -34,6 +34,39 @@ nicht raten.
 - Diese Struktur ist ab Projekt 1 etabliert und wird in Projekt 3 auf
   mehrere Hosts erweitert (nicht neu erfinden).
 
+## Secrets: vorhandener age-Schlüssel (Nutzer-Vorgabe, projektübergreifend)
+
+Der Nutzer besitzt bereits einen age private key und verwendet diesen
+weiter. **In keinem Projekt wird ein age-Schlüssel erzeugt** — weder per
+`age-keygen` noch per `sops.age.generateKey = true` (dessen Default
+`false` passt ohnehin: "the key must already be present at the specified
+location"). Teil I, Kapitel 10 bleibt davon unberührt (dort wird der
+Mechanismus allgemein erklärt); ab Teil II gilt diese Vorgabe.
+
+Platzhalter dafür stehen in `projekt-1-forgejo-runner/00-uebersicht.md`:
+`<age-recipient>` (öffentlicher Empfänger) und `<age-key-file>` (private
+Schlüsseldatei auf der Workstation). Keine erfundenen `age1...`-Werte in
+Beispielen — ein kopierfähiger Fake-Empfänger wäre eine Fehlerquelle.
+
+Zwei Varianten, beide vom Nutzer freigegeben:
+
+- **Hauptweg (Projekt 1, Schritt 15): ein Schlüssel für alles.** Der
+  vorhandene Key ist einziger Empfänger in `.sops.yaml` und wird auf den
+  Host ausgerollt, dort genutzt über `sops.age.keyFile`, dazu
+  `generateKey = false` und `sshKeyPaths = [ ]` (sonst hängt sops-nix per
+  Default zusätzlich die ed25519-Host-Keys als Identität ein).
+  Preis: Der private Schlüssel liegt auf jedem Zielsystem.
+- **Variante: getrennte Rollen.** Der Key bleibt Admin-/Recovery-
+  Schlüssel auf der Workstation, der Host entschlüsselt über eine aus
+  seinem SSH-Host-Key abgeleitete Identität (`ssh-to-age` rechnet nur um,
+  erzeugt kein neues Schlüsselmaterial). Preis: zwei Empfänger und
+  `sops updatekeys` nach jedem Neuaufsetzen eines Hosts.
+
+**Für Projekt 2 und 3 ist die getrennte Variante der Zielzustand** — dort
+gibt es mehrere Hosts, und ein Schlüssel, der auf allen liegt, hebt die
+Trennung zwischen ihnen auf. Schritt 15 erklärt beide Wege bereits, die
+Folgeprojekte können darauf verweisen statt neu herzuleiten.
+
 ## Projekt 1 (Forgejo-Runner-LXC) — feststehende Werte
 
 Siehe `projekt-1-forgejo-runner/00-uebersicht.md` für die vollständige
@@ -74,6 +107,21 @@ zugehörigen Schritt verlinkt):
   innerhalb von Proxmox-LXC-Containern historisch nicht immer
   zuverlässig war; deshalb testet der nächste Schritt zunächst mit
   `nixos-rebuild build`, bevor `switch` läuft.
+- `--ostype unmanaged` und der Nixpkgs-Default `proxmoxLXC.manageNetwork
+  = false` treffen gegenläufige Annahmen und ergeben zusammen einen
+  Container **ohne IP und ohne DNS**: Proxmox' Setup-Plugin
+  `PVE::LXC::Setup::Unmanaged` hat leere `setup_network`/`set_hostname`/
+  `set_dns`-Rümpfe, während `proxmox-lxc.nix` bei `manageNetwork = false`
+  genau `useDHCP = false; useNetworkd = true; useHostResolvConf = false;`
+  setzt und darauf wartet, dass Proxmox etwas hinterlegt hat. Deshalb
+  trägt schon `bootstrap.nix` (Schritt 1) `proxmoxLXC.manageNetwork =
+  true;` und `networking.useDHCP = true;` — sonst kann Schritt 2 von
+  innen kein `nixpkgs` laden. Beim Übertragen der Baseline auf Projekt 2/3
+  (VMs statt LXC) entfällt dieser Sonderfall.
+- `pve.proxmox.com` und `git.proxmox.com` sind aus der Arbeitsumgebung
+  nicht erreichbar. Belastbarer Ersatz für Proxmox-Behauptungen ist der
+  GitHub-Spiegel des Quellcodes (`github.com/proxmox/pve-container`),
+  nicht Community-Gists — so sind `pct push`/`pct pull` belegt.
 - Ob `/etc/services` unter NixOS nach einer SSH-Port-Änderung angepasst
   werden muss: **Noch nicht abschließend im Schritt dokumentiert** —
   offener Recherchepunkt für den SSH-Härtung-Schritt (voraussichtlich
@@ -82,6 +130,58 @@ zugehörigen Schritt verlinkt):
   und `/etc/services` unter NixOS ohnehin generiert statt von Hand
   gepflegt wird — das ist eine vorläufige Einschätzung, muss im
   entsprechenden Schritt noch sauber mit Quelle belegt werden).
+
+## Projekt 1 — Dateikontrakt (verbindlich ab Schritt 2)
+
+Damit die Schritte 2–16 zusammenpassen (und Projekt 2/3 die Baseline
+übernehmen können), steht die Repo-Struktur des Lesers vorab fest.
+Kein Schritt erfindet eigene Pfade oder Modulnamen.
+
+```
+<repo-root>/
+├── flake.nix                        Schritt 2
+├── flake.lock                       Schritt 2 (erzeugt, gepinnt)
+├── hosts/
+│   └── <hostname>/
+│       ├── bootstrap.nix            Schritt 1 (nur fürs Template)
+│       ├── create-container.sh      Schritt 1
+│       └── configuration.nix        Schritt 2 (Host-Einstieg)
+└── modules/
+    ├── baseline/
+    │   ├── default.nix              Schritt 3 (Sammel-Import, wächst per Diff)
+    │   ├── users.nix                Schritt 3
+    │   ├── sudo.nix                 Schritt 4
+    │   ├── ssh.nix                  Schritt 5 (+ Klärung Schritt 6)
+    │   ├── fail2ban.nix             Schritt 7
+    │   ├── ldap.nix                 Schritt 8
+    │   └── firewall.nix             Schritt 9
+    └── runner/
+        ├── default.nix              Schritt 10 (Sammel-Import)
+        ├── container-runtime.nix    Schritt 10
+        ├── forgejo-runner.nix       Schritt 11
+        └── runner.env               Schritt 12 (Klartext-Variante)
+```
+
+Regeln dazu:
+
+- `hosts/<hostname>/configuration.nix` importiert `../../modules/baseline`
+  und (ab Schritt 10) `../../modules/runner`; die beiden `default.nix`
+  sammeln ihre Geschwisterdateien in `imports`. Jeder Schritt ab 4 legt
+  **eine** neue Moduldatei an und ergänzt genau eine Zeile in der
+  passenden `default.nix` (Diff-Stil).
+- Im Container ist dasselbe Repo unter `/etc/nixos` ausgecheckt.
+  Rebuild-Kommando durchgängig:
+  `nixos-rebuild switch --flake /etc/nixos#<hostname>`
+  (bzw. `build` statt `switch` zum Testen).
+- Instanzname des Runners in
+  `services.gitea-actions-runner.instances.<runner-name>` ist der
+  Platzhalter `<runner-name>` aus der Tabelle.
+- Der sops-age-Exkurs (Schritt 15) ersetzt `modules/runner/runner.env`
+  nicht, sondern stellt ihm `secrets/runner.env` (verschlüsselt) plus
+  `.sops.yaml` unter `<repo-root>/` gegenüber.
+- Dateinamen der Buchkapitel = Schrittnummer: `NN-<slug>.md` unter
+  `projekt-1-forgejo-runner/`, `weight: NN`. Schritt 6 bleibt ein
+  eigener (kurzer) Schritt, damit Datei- und Schrittnummern 1:1 bleiben.
 
 ## Projekt 2 (von der KI vorgeschlagen, freigegeben)
 

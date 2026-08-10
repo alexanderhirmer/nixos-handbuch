@@ -139,3 +139,105 @@ Laufend gepflegt, ein Eintrag pro eingeführtem Begriff. Vollversion – der Anh
 - **`environment.persistence`**: Option des impermanence-Moduls, listet Verzeichnisse/Dateien, die einen Reboot überleben sollen.
 - **tmpfs-Root vs. ZFS-/Btrfs-Rollback**: Zwei Umsetzungswege für Impermanence – RAM-basiert (einfach, stromausfallanfällig) vs. Snapshot-Rollback (robuster).
 - **Was NixOS absichert vs. Nutzdaten**: Systemkonfiguration ist aus dem Repo reproduzierbar, Nutzdaten (Datenbanken, Uploads, Logs) brauchen eine eigene Backup-Strategie.
+
+## Teil II, Projekt 1 – Gehärteter Forgejo-Runner-LXC
+
+### Schritt 1 (Container anlegen)
+
+- **`--ostype unmanaged`**: `pct create`-Flag für Betriebssystemtypen, die Proxmox nicht kennt (wie NixOS). Proxmox weist dem Container dafür das Setup-Plugin `PVE::LXC::Setup::Unmanaged` zu, dessen Methoden `setup_network`, `set_hostname` und `set_dns` leere Rümpfe sind – Proxmox schreibt also nichts in den Gast, obwohl z. B. `ip=dhcp` gesetzt ist.
+- **`proxmoxLXC.manageNetwork`**: Option aus `proxmox-lxc.nix`. Default `false` lässt das Modul `useDHCP = false; useNetworkd = true; useHostResolvConf = false;` setzen – es erwartet dann fertige Netzwerkdaten von Proxmox. Weil `--ostype unmanaged` diese Daten nie liefert, wird die Option in diesem Projekt schon im Bootstrap-Template auf `true` gesetzt; `networking.useDHCP = true` übernimmt die Adressvergabe stattdessen selbst.
+
+### Schritt 2 (Flake-Grundgerüst)
+
+- **`proxmoxLXC.manageHostName`**: Ebenfalls aus `proxmox-lxc.nix`, analog zu `manageNetwork` (Schritt 1): Bei `false` erzwingt das Modul `hostName = mkForce ""` und erwartet den Hostnamen von Proxmox. Hier auf `true` gesetzt, weil `--ostype unmanaged` ihn nie liefert.
+- **`pct push`/`pct pull`**: Proxmox-CLI-Befehle, die genau eine Datei zwischen Proxmox-Host und einem laufenden LXC-Container kopieren – push hinein, pull heraus. Funktionieren unabhängig vom Netzwerkzustand des Gasts; laut Proxmox-Quellcode setzt `push` einen laufenden Container voraus.
+- **Bootstrap-Aktivierung von Flakes (`/etc/nix/nix.conf`)**: Vor dem ersten erfolgreichen `switch` kann `nix.settings.experimental-features` aus der eigenen Konfiguration noch nicht greifen; ein einmaliges `echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf` schaltet Flakes für die ersten Aufrufe von außen frei.
+
+### Schritt 3 (Lokaler Admin-Nutzer)
+
+- **`hashedPassword = null`**: NixOS-Default für `users.users.<name>.hashedPassword` – laut Options-Beschreibung "this user will not be able to log in using a password". In Kombination mit `users.mutableUsers = false` schreibt die Aktivierung ein literales `!` ins Passwortfeld von `/etc/shadow`.
+- **`allowsLogin`-Semantik (`/etc/shadow`-Feld)**: `""` (leer) erlaubt laut Nixpkgs-Quellcode Login *ohne* Passwort; `!`, `!!`, `*` oder `null` verhindern Passwort-Login vollständig; jeder andere Wert gilt als echter Hash.
+- **Lockout-Schutzassertion**: NixOS bricht den Build bei `users.mutableUsers = false` ab, wenn weder `root` noch ein `wheel`-Mitglied ein funktionierendes Login (Passwort oder SSH-Key) hätte.
+- **`update-users-groups.pl`**: Das Perl-Skript, das `/etc/passwd`, `/etc/group` und `/etc/shadow` aus der deklarierten Nutzerkonfiguration erzeugt (Standardpfad, solange weder `systemd.sysusers` noch `services.userborn` aktiv sind).
+
+### Schritt 4 (Passwortloses Sudo)
+
+- **`security.sudo.extraRules`**: Listenwertige NixOS-Option für zusätzliche `sudoers`-Regeln; das Modul selbst trägt darüber bereits Default-Regeln für `root` und `wheel` ein. Bei mehreren passenden Zeilen für denselben Nutzer gewinnt in `/etc/sudoers` die letzte – die Reihenfolge in der zusammengeführten Liste entscheidet also über die Wirkung.
+- **`security.sudo.wheelNeedsPassword`**: Schaltet Passwortpflicht für die gesamte `wheel`-Gruppe ab, wenn `false` – NixOS-Default ist `true`.
+- **`lib.mkOrder`**: Die allgemeine Form hinter `mkBefore`/`mkAfter` (Kapitel 5) – legt die Position eines Werts in einer per `mkMerge` zusammengeführten Liste fest, unabhängig davon, welcher *Wert* bei einem echten Konflikt gewinnt (das regeln `mkDefault`/`mkForce`).
+
+### Schritt 5 (SSH-Härtung)
+
+- **`services.openssh.settings`**: Freeform-Submodule für `sshd_config`-Direktiven; wandelt Nix-Attribute automatisch in gültige `sshd_config`-Syntax um (u. a. `true`/`false` → `yes`/`no`).
+- **`services.openssh.extraConfig`**: Verbatim-Text, der ans Ende der generierten `sshd_config` angehängt wird – der einzig syntaktisch gültige Ort für `Match`-Blöcke, weil er immer hinter den aus `settings` erzeugten Zeilen liegt. In diesem Projekt bewusst nicht für einen `Match`-Block genutzt.
+- **`Type = "notify-reload"` (systemd)**: Service-Typ, bei dem eine geänderte Unit nicht hart neu gestartet, sondern per Reload-Mechanismus aktualisiert wird – bestehende Verbindungen/Sitzungen bleiben dabei unangetastet. `sshd` nutzt diesen Typ.
+
+### Schritt 6 (Exkurs: /etc/services)
+
+- **`pkgs.iana-etc`**: Nixpkgs-Paket, das ein vorgefertigtes Release-Tarball des Projekts `Mic92/iana-etc` (Republishing der IANA-Port-/Protokoll-Registry) lädt und als `/etc/services`/`/etc/protocols` bereitstellt – keine Eigenkompilierung, keine Kenntnis der tatsächlichen Dienstkonfiguration.
+- **`environment.etc.<name>.source` vs. `.text`**: Zwei sich gegenseitig ausschließende Wege, den Inhalt einer generierten `/etc`-Datei zu bestimmen; `/etc` wird bei jeder Aktivierung komplett neu aus `environment.etc` aufgebaut.
+
+### Schritt 7 (fail2ban)
+
+- **fail2ban-„Jail"**: Kombination aus Filter (Logauswertung) und Action (z. B. IP sperren), pro Dienst konfigurierbar; die spezielle `DEFAULT`-Jail liefert Fallback-Werte für alle anderen Jails. NixOS bringt ein vorkonfiguriertes `sshd`-Jail mit, das seinen Port automatisch aus `services.openssh.ports` übernimmt.
+- **`backend = "systemd"` (fail2ban)**: Ein Jail liest Fehlversuche direkt aus dem systemd-Journal statt eine Logdatei zu parsen.
+- **`bantime-increment`**: fail2ban-Mechanismus, der die Sperrdauer bei wiederholten Verstößen derselben IP progressiv verlängert (Standardformel: Faktor 1, 2, 4, 8, 16 … × `bantime`).
+
+### Schritt 8 (LDAP-Anbindung mit sssd)
+
+- **sssd (System Security Services Daemon)**: Dienst, der einen oder mehrere Identitäts-/Auth-Provider (z. B. LDAP) bündelt und dem restlichen System einheitlich über NSS und PAM zur Verfügung stellt.
+- **NSS (Name Service Switch)**: Der über `/etc/nsswitch.conf` gesteuerte Umschalter, welche Quellen (`files`, `sss`, …) für Lookups wie `passwd`/`group`/`shadow` befragt werden; unter NixOS aus `system.nssDatabases` generiert.
+- **pam_sss**: PAM-Modul aus sssd, das Authentifizierung sowie Account-/Session-Handling gegen die konfigurierten sssd-Domains übernimmt; wird von NixOS automatisch in jeden Standard-PAM-Service eingehängt, sobald `services.sssd.enable = true`.
+- **pam_mkhomedir**: PAM-Session-Modul, das beim Login ein fehlendes `$HOME` anlegt – unter NixOS aktiviert über `security.pam.services.<name>.makeHomeDir`.
+- **Bind-DN (Default Bind)**: Distinguished Name, mit dem sssd sich gegenüber LDAP authentisiert, um Nutzer zu *suchen* (`ldap_default_bind_dn`/`ldap_default_authtok`) – zu unterscheiden vom Login-Bind, bei dem sssd sich testweise mit den Zugangsdaten des einloggenden Nutzers verbindet.
+
+### Schritt 9 (Firewall)
+
+- **nftables**: Linux-Firewall-Framework, Nachfolger von iptables/xtables; verwaltet Regeln über den Kernel-Mechanismus `nf_tables`.
+- **iptables-nft (`xtables-nft-multi`)**: Kompatibilitätsschicht, die die klassische `iptables`-Kommandozeile beibehält, Regeln intern aber in `nf_tables` übersetzt – unter NixOS der Default, weil `pkgs.iptables` mit `nftablesCompat = true` gebaut wird.
+- **CAP_NET_ADMIN**: Linux-Capability für Netzwerkkonfiguration und Netfilter/nftables-Verwaltung; in einem unprivilegierten LXC-Container innerhalb des eigenen Namespace vorhanden, ohne dass Proxmox' `nesting`-Feature dafür nötig wäre.
+- **Proxmox-Firewall**: Von der Gast-Firewall unabhängige, zusätzliche Filterschicht auf dem Proxmox-Host; pro Container über `/etc/pve/firewall/<vmid>.fw` konfiguriert, pro Netzwerkinterface über den Parameter `firewall=<0|1>` scharf geschaltet.
+
+### Schritt 10 (Container-Laufzeit: Podman)
+
+- **`virtualisation.podman`**: NixOS-Modul für Podman, einen daemonlosen, Docker-API-kompatiblen Container-Manager; `enable = true` aktiviert u. a. einen systemd-Socket, der den Daemon-Prozess erst bei Bedarf startet.
+- **Nesting (LXC)**: Proxmox-Container-Feature (`pct set --features nesting=1`), das einem LXC-Container erlaubt, selbst wieder Container-/Mount-Namespaces aufzuspannen – Voraussetzung für jede Container-Laufzeit innerhalb eines LXC-Gasts.
+- **`keyctl`-Feature (LXC)**: Proxmox-Container-Feature, das in unprivilegierten Containern den sonst per Seccomp blockierten `keyctl()`-Syscall freigibt.
+- **fuse-overlayfs**: Nutzerraum-Implementierung von OverlayFS auf Basis von FUSE; springt ein, wo native Kernel-Overlay-Mounts mangels `CAP_SYS_ADMIN` (typisch in unprivilegierten/genesteten Containern) scheitern könnten.
+- **`mount_program` (containers/storage)**: Storage-Option, die Podman/Docker anweist, Overlay-Mounts über ein externes Programm (z. B. `fuse-overlayfs`) statt über den Kernel direkt vorzunehmen.
+
+### Schritt 11 (Forgejo-Runner-Dienst)
+
+- **`services.gitea-actions-runner`**: NixOS-Modul für den Gitea-/Forgejo-Actions-Runner; `package` ist eine globale Option (Default `pkgs.gitea-actions-runner`, hier auf `pkgs.forgejo-runner` gesetzt), jede konkrete Registrierung liegt unter `instances.<name>` (Submodule mit `enable`, `name`, `url`, `token`/`tokenFile`, `labels`, `settings`, `hostPackages`).
+- **Label-Syntax (Actions-Runner)**: `<label>:docker://<image>` bindet ein `runs-on:`-Label an ein Container-Image (vor jedem Job gezogen); `<label>:host` führt den Job stattdessen direkt auf dem Runner-Host aus, ohne Container. Eine leere `labels`-Liste bedeutet die Upstream-Default-Labels, die zwingend Docker/Podman voraussetzen.
+- **`escapeSystemdPath`**: Nixpkgs-Hilfsfunktion (`nixos/lib/utils.nix`), die einen String wie einen Dateipfad behandelt und dabei u. a. jeden literalen Bindestrich zu `\x2d` escaped – erzeugt reale systemd-Unit-Namen, die von der geschriebenen Nix-Konfiguration optisch abweichen (`ci-runner-01` → `ci\x2drunner\x2d01`). Cross-Check-Tool: `systemd-escape`.
+
+### Schritt 12 (Runner-Konfiguration als .env)
+
+- **`unitOption` (Merge-Typ)**: Der Nixpkgs-Options-Typ hinter `systemd.services.<name>.serviceConfig.*`; merged mehrere Definitionen automatisch zu einer Liste, sobald mindestens eine der Definitionen selbst eine Liste ist – sonst gilt Gleichheits-Zwang (`mergeEqualOption`).
+- **`utils`-Modulargument**: Ein von NixOS an jedes Modul optional gereichtes Spezial-Argument (neben `config`, `lib`, `pkgs`) mit Hilfsfunktionen wie `escapeSystemdPath` – muss im Funktionskopf (`{ pkgs, utils, ... }:`) explizit benannt werden, um im Modulkörper nutzbar zu sein.
+
+### Schritt 13 (Runner registrieren)
+
+- **Registrierungs-Token**: Einmalig in der Forgejo-Weboberfläche erzeugtes Token, mit dem sich ein `forgejo-runner`-Prozess bei einer Forgejo-Instanz anmeldet. Wiederverwendbar für mehrere Runner-Prozesse, kein Single-Use-Token.
+- **`tokenFile` vs. `token`** (`services.gitea-actions-runner.instances.<name>`): `token` landet wortwörtlich in der generierten, weltlesbaren Store-Unit; `tokenFile` verweist stattdessen auf einen externen Pfad, der als `EnvironmentFile=` dient und vom systemd-Manager (root) noch vor jedem Privilegien-Wechsel gelesen wird. Eine Assertion erzwingt genau eines von beiden.
+- **`.runner`-Datei**: Marker-/Statusdatei unter `/var/lib/gitea-runner/<name>/`, die eine erfolgreiche Registrierung festhält (inkl. eines von der Registrierung verschiedenen Laufzeit-Credentials). Fehlt sie, registriert sich der Runner beim nächsten Start neu.
+
+### Schritt 14 (Test-Workflow)
+
+- **`.forgejo/workflows/`**: Vorrangiges Verzeichnis für Forgejo-Actions-Workflows; fehlt es, fällt Forgejo auf `.github/workflows/` zurück. Sind beide vorhanden, führt Forgejo (anders als GitHub) Workflows aus beiden Verzeichnissen aus.
+- **`runs-on`-Label-Matching**: Der Teil eines registrierten Runner-Labels vor dem ersten Doppelpunkt (z. B. `ubuntu-latest` in `ubuntu-latest:docker://node:20-bookworm`) ist der Name, den `runs-on:` referenziert – der Teil danach legt intern fest, wie der Job ausgeführt wird, ist für den Workflow-Autor aber unsichtbar.
+- **`DEFAULT_ACTIONS_URL`**: `app.ini`-Option (`[actions]`) einer Forgejo-Instanz, die bestimmt, von wo unqualifizierte `uses:`-Angaben aufgelöst werden.
+- **`hostPackages`** (`services.gitea-actions-runner.instances.<name>.hostPackages`): Paketliste, die bei einem `:host`-Schema-Label auf den `$PATH` des Jobs gelegt wird (Default u. a. `bash`, `coreutils`, `curl`, `gawk`, `gitMinimal`, `gnused`, `nodejs`, `wget`) – irrelevant bei `:docker:`-Labels.
+
+### Schritt 15 (Exkurs: sops-age)
+
+- **age-Empfänger (recipient) vs. age-Identität**: Der Empfänger ist der öffentliche Teil (`age1…`) und steht in `.sops.yaml` – für ihn wird verschlüsselt. Die Identität ist der private Teil, mit dem entschlüsselt wird. Ein Host braucht eine Identität, ein Repo kennt nur Empfänger. Die Trennung entscheidet darüber, ob ein privater Schlüssel auf einem Zielsystem liegen muss.
+- **`ssh-to-age`**: Tool, das einen vorhandenen SSH-Key (Host- oder Nutzer-Key, Ed25519) in einen age-kompatiblen Schlüssel umrechnet. Erzeugt kein neues Schlüsselmaterial, sondern rechnet vorhandenes um – so bekommt ein Host eine eigene age-Identität, ohne dass ein privater Schlüssel dorthin kopiert werden muss.
+- **`sops.age.sshKeyPaths`**: sops-nix-Option, die angibt, welche SSH-Host-Keys als age-Identität zur Entschlüsselung dienen; Default ist bereits die Liste der ed25519-Keys aus `config.services.openssh.hostKeys`. Wer stattdessen ausschließlich einen mitgebrachten Schlüssel nutzen will, muss sie ausdrücklich auf `[ ]` setzen – sonst hängt sops-nix den Host-Key zusätzlich ein.
+- **`sops.age.keyFile`**: Pfad zu einer bereits vorhandenen privaten age-Schlüsseldatei auf dem Zielsystem. Typisiert als `pathNotInStore`, siehe dort.
+- **`sops.age.generateKey`**: Schaltet das Erzeugen eines age-Schlüssels ein, falls unter `keyFile` keiner liegt. Default ist `false` – "the key must already be present at the specified location". Für Setups, die einen bestehenden Schlüssel weiterverwenden, ist der Default bereits der richtige Wert.
+- **`pathNotInStore`** (Nixpkgs-`lib.types`): Pfad-Typ, der Werte unterhalb von `/nix/store` zur Auswertungszeit ablehnt. Wird für Optionen verwendet, die auf Geheimnisse zeigen – er macht das "nicht in den Store kopieren" vom guten Vorsatz zur erzwungenen Regel.
+- **`sops updatekeys`**: sops-Unterbefehl, der eine bereits verschlüsselte Datei an die aktuellen `creation_rules` der `.sops.yaml` anpasst. Nötig, sobald ein Empfänger dazukommt oder wegfällt – ohne diesen Lauf kann ein neu eingetragener Empfänger bestehende Dateien nicht entschlüsseln.
+- **`format = "dotenv"`** (sops-nix `sops.secrets.<name>.format`): Behandelt die referenzierte sops-Datei als `.env`-Datei; anders als bei YAML/JSON wird dabei nie ein einzelner Schlüssel extrahiert, sondern immer die gesamte entschlüsselte Datei als ein Secret ausgegeben (wie bei `binary`/`ini`). Die separate Option `sops.secrets.<name>.key` ist für dieses Format laut sops-nix-Quellcode wirkungslos.
+- **Store-Pfad-Literal vs. String-Pfad (bei Secrets)**: Ein Nix-Ausdruck wie `./runner.env` (Pfad-Literal, Kapitel 3) wird beim Bauen automatisch und weltlesbar in den Store kopiert; ein gleichlautender String wie `config.sops.secrets.x.path` bleibt reiner Text und verweist erst zur Aktivierungszeit auf einen Pfad außerhalb des Stores (bei sops-nix: `/run/secrets/…`, tmpfs).

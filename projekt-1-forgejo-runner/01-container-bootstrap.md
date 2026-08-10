@@ -22,8 +22,19 @@ Schritt 0 (Übersicht/Platzhaltertabelle) ist abgeschlossen. Ein Rechner mit Nix
 { modulesPath, ... }:
 {
   imports = [ (modulesPath + "/virtualisation/proxmox-lxc.nix") ];
+
+  # Die eine Ausnahme vom Minimalprinzip – Begründung direkt darunter.
+  proxmoxLXC.manageNetwork = true;
+  networking.useDHCP = true;
 }
 ```
+
+Diese zwei Zeilen sind kein Komfort, sondern Voraussetzung dafür, dass Schritt 2 überhaupt funktioniert. Der Grund liegt im Zusammenspiel zweier Vorgaben, die gegenläufige Annahmen treffen:
+
+- `--ostype unmanaged` (siehe Punkt 5) lässt Proxmox das Setup-Plugin `PVE::LXC::Setup::Unmanaged` verwenden. Dessen Methoden `setup_network`, `set_hostname` und `set_dns` sind leere Rümpfe – Proxmox schreibt also *nichts* in den Gast, obwohl `--net0 …,ip=dhcp` gesetzt ist. Der veth-Adapter `eth0` existiert, bekommt aber keine Adresse.<sup>1</sup>
+- `proxmox-lxc.nix` setzt umgekehrt bei seinem Default `manageNetwork = false` genau `useDHCP = false; useNetworkd = true; useHostResolvConf = false;` – es *erwartet*, dass Proxmox die Netzwerkdaten bereits hinterlegt hat.<sup>2</sup>
+
+Beides zusammen ergibt einen Container ohne IP und ohne DNS. Für einen Bootstrap, der nur per `pct enter` bedient wird, fiele das nicht auf – aber Schritt 2 lädt von innen `nixpkgs` aus dem Netz und würde ohne diese Zeilen scheitern. `manageNetwork = true` schaltet den Automatismus des Moduls ab, `useDHCP = true` überlässt die Adressvergabe dem DHCP-Server; die feste `<ip>` kommt dann in Schritt 2 deklarativ dazu.
 
 **2. Template bauen** (Mechanismus aus Teil I, Kapitel 4):
 
@@ -66,7 +77,7 @@ pct create <vmid> local:vztmpl/nixos-<hostname>-bootstrap.tar.xz \
 pct start <vmid>
 ```
 
-`--ostype unmanaged` ist wichtig: Proxmox kennt NixOS nicht als Betriebssystemtyp und würde bei einem bekannten Typ versuchen, Netzwerk/Hostname direkt in Gastdateien zu schreiben, die es unter NixOS so nicht gibt. Die feste IP aus der Platzhaltertabelle kommt in Schritt 2 über NixOS' eigene, deklarative Netzwerkkonfiguration – nicht über Proxmox' Injection.
+`--ostype unmanaged` ist wichtig: Proxmox kennt NixOS nicht als Betriebssystemtyp und würde bei einem bekannten Typ versuchen, Netzwerk/Hostname direkt in Gastdateien zu schreiben, die es unter NixOS so nicht gibt. Der Preis dafür ist genau die Lücke aus Punkt 1 – Proxmox konfiguriert dann auch das, was es könnte, nicht mehr. Die feste IP aus der Platzhaltertabelle kommt in Schritt 2 über NixOS' eigene, deklarative Netzwerkkonfiguration – nicht über Proxmox' Injection.
 
 *GUI-Äquivalent:* "Create CT" (oben rechts) → Assistent durchklicken, Werte wie oben; das Skript ist hier trotzdem die maßgebliche Fassung, da es versioniert und wiederholbar ist.
 
@@ -84,12 +95,15 @@ $ <repo-root>/hosts/<hostname>/create-container.sh
 
 - `pct status <vmid>` meldet den Status `running`.
 - `pct enter <vmid>` liefert eine Root-Shell im Container; `nixos-version` darin gibt eine gültige NixOS-Versionszeile aus.
+- Im Container zeigt `ip -4 addr show eth0` eine vom DHCP-Server vergebene Adresse (nicht nur `lo`), und `curl -sI https://cache.nixos.org` liefert eine HTTP-Statuszeile. Beides muss stimmen, bevor Schritt 2 sinnvoll beginnen kann – ohne Namensauflösung und Netzzugang lädt `nixos-rebuild` dort kein `nixpkgs`.
 
 ## Wenn's schiefgeht
 
 **"unable to create CT – no such logical volume" o. Ä. bei `--rootfs`:** Der Storage-Name in `<pve-storage>` existiert nicht oder unterstützt keine Container-Rootfs. Mit `pvesm status` die tatsächlich verfügbaren, Container-fähigen Storages prüfen.
 
 **Container startet, aber `pct enter` hängt oder bricht ab:** Meist ein zu minimales oder fehlerhaftes Template (z. B. `proxmox-lxc.nix` nicht importiert). Mit `pct exec <vmid> -- <n>` prüfen, ob überhaupt Prozesse laufen; im Zweifel Template neu bauen.
+
+**`ip -4 addr show eth0` zeigt keine Adresse, `curl` scheitert an der Namensauflösung:** Das Template wurde ohne die beiden Netzwerkzeilen aus Punkt 1 gebaut – dann konfiguriert weder Proxmox noch NixOS das Interface. Fix: `bootstrap.nix` ergänzen, Template neu bauen und hochladen, Container aus dem neuen Template neu anlegen. Als Sofortmaßnahme ohne Neubau lässt sich im Container mit `ip addr add`/`ip route add` von Hand eine Adresse setzen; das überlebt aber keinen Neustart und ist nur ein Notbehelf.
 
 **Upload schlägt mit "unable to activate storage" fehl:** Die Storage `local` hat den Inhaltstyp `vztmpl` nicht aktiviert. Fix laut Proxmox-Dokumentation: `pvesm set local --content vztmpl,rootdir,images,iso`.
 
@@ -104,3 +118,9 @@ $ rm /var/lib/vz/template/cache/nixos-<hostname>-bootstrap.tar.xz
 ## Querverweis
 
 Proxmox-LXC-Templates mit `proxmox-lxc.nix` und `nixos-generators`: Teil I, Kapitel 4 ("Proxmox als LXC-Container"). Dort auch die dokumentierte Einschränkung, dass `nixos-rebuild` innerhalb eines Proxmox-LXC-Containers historisch nicht immer zuverlässig war – genau deshalb baut Schritt 2 die Vollkonfiguration testweise zuerst mit `nixos-rebuild build`, bevor `switch` läuft.
+
+---
+
+<sup>1</sup> Quelle: Proxmox-Quellcode, `pve-container`, `src/PVE/LXC/Setup/Unmanaged.pm` – die Methoden `setup_network`, `set_hostname` und `set_dns` sind dort leere Rümpfe: https://github.com/proxmox/pve-container/blob/master/src/PVE/LXC/Setup/Unmanaged.pm
+
+<sup>2</sup> Quelle: Nixpkgs-Quellcode, `nixos/modules/virtualisation/proxmox-lxc.nix` (Branch `release-26.05`) – `networking = mkIf (!cfg.manageNetwork) { useDHCP = false; useHostResolvConf = false; useNetworkd = true; … }`: https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/virtualisation/proxmox-lxc.nix

@@ -11,23 +11,27 @@ Ordner: `projekt-1-forgejo-runner/`
 
 - [x] 0. Architekturüberblick und Platzhaltertabelle stehen (Hostname, IP, LDAP-Domain, Forgejo-URL, Admin-User-Schema). → `00-uebersicht.md`
 - [x] 1. Der LXC-Container ist über ein versioniertes Skript (feste `pct create`-Parameter) angelegt, nicht per Ad-hoc-Eingabe. → `01-container-bootstrap.md`
-- [ ] 2. Ein Flake-Grundgerüst mit `configuration.nix` und gesetztem `hostName` baut erfolgreich (per `nixos-rebuild build` von innen getestet, dann `switch`).
-- [ ] 3. Der lokale Nutzer `f-local-admin-<hostname>` existiert, ausschließlich mit hinterlegtem SSH-Key, kein Passwort gesetzt.
-- [ ] 4. `security.sudo.extraRules` gewährt ausschließlich diesem Nutzer passwortloses sudo.
-- [ ] 5. SSH läuft auf Port 40, `PermitRootLogin` ist deaktiviert. (Inkl. Klärung `/etc/services`, siehe `ENTSCHEIDUNGEN.md`.)
-- [ ] 6. Geklärt und dokumentiert ist, ob `/etc/services` unter NixOS überhaupt manuell angepasst werden muss. (Kann mit Schritt 5 zusammengelegt werden, wenn sich das beim Schreiben anbietet.)
-- [ ] 7. `fail2ban` ist aktiv und schützt den SSH-Dienst auf dem neuen Port.
-- [ ] 8. `sssd` bindet den Container an das bestehende LDAP an, ein LDAP-Testnutzer kann sich per Passwort einloggen.
-- [ ] 9. Die Firewall lässt ausschließlich Port 40 (und was der Runner sonst braucht) herein.
-- [ ] 10. `virtualisation.podman` (oder docker) ist aktiv, damit der Runner Container-Jobs ausführen kann.
-- [ ] 11. `services.gitea-actions-runner` ist mit `package = pkgs.forgejo-runner` konfiguriert.
-- [ ] 12. Eine `.env`-Datei mit Klartext-Werten ist angelegt und vom Runner eingebunden.
-- [ ] 13. Der Runner ist mit einem in der Forgejo-Weboberfläche erzeugten Token registriert und online.
-- [ ] 14. Ein Test-Workflow läuft erfolgreich über den neuen Runner durch.
-- [ ] 15. Exkurs: dieselbe `.env` liegt stattdessen sops-age-verschlüsselt vor, der Unterschied zur Klartext-Variante ist erklärt.
-- [ ] 16. Projektabschluss: vollständiger Repo-Baum, gesammelte Endkonfiguration, 3–5 Ausbaustufen, Teardown-Anleitung stehen.
+- [x] 2. Ein Flake-Grundgerüst mit `configuration.nix` und gesetztem `hostName` baut erfolgreich (per `nixos-rebuild build` von innen getestet, dann `switch`). → `02-flake-grundgeruest.md`
+- [x] 3. Der lokale Nutzer `f-local-admin-<hostname>` existiert, ausschließlich mit hinterlegtem SSH-Key, kein Passwort gesetzt. → `03-lokaler-admin.md`
+- [x] 4. `security.sudo.extraRules` gewährt ausschließlich diesem Nutzer passwortloses sudo. → `04-sudo.md`
+- [x] 5. SSH läuft auf Port 40, `PermitRootLogin` ist deaktiviert. → `05-ssh-haertung.md`
+- [x] 6. Geklärt und dokumentiert ist, ob `/etc/services` unter NixOS überhaupt manuell angepasst werden muss. **Nicht** mit Schritt 5 zusammengelegt, damit Datei- und Schrittnummern 1:1 bleiben. Ergebnis: nein, belegt. → `06-etc-services.md`
+- [x] 7. `fail2ban` ist aktiv und schützt den SSH-Dienst auf dem neuen Port. → `07-fail2ban.md`
+- [x] 8. `sssd` bindet den Container an das bestehende LDAP an, ein LDAP-Testnutzer kann sich per Passwort einloggen. → `08-ldap-sssd.md`
+- [x] 9. Die Firewall lässt ausschließlich Port 40 (und was der Runner sonst braucht) herein. → `09-firewall.md`
+- [x] 10. `virtualisation.podman` (oder docker) ist aktiv, damit der Runner Container-Jobs ausführen kann. → `10-container-runtime.md`
+- [x] 11. `services.gitea-actions-runner` ist mit `package = pkgs.forgejo-runner` konfiguriert. → `11-forgejo-runner.md`
+- [x] 12. Eine `.env`-Datei mit Klartext-Werten ist angelegt und vom Runner eingebunden. → `12-env-datei.md`
+- [x] 13. Der Runner ist mit einem in der Forgejo-Weboberfläche erzeugten Token registriert und online. → `13-runner-registrieren.md`
+- [x] 14. Ein Test-Workflow läuft erfolgreich über den neuen Runner durch. → `14-test-workflow.md`
+- [x] 15. Exkurs: dieselbe `.env` liegt stattdessen sops-age-verschlüsselt vor, der Unterschied zur Klartext-Variante ist erklärt. → `15-exkurs-sops-age.md`
+- [x] 16. Projektabschluss: vollständiger Repo-Baum, gesammelte Endkonfiguration, 3–5 Ausbaustufen, Teardown-Anleitung stehen. → `16-projektabschluss.md`
 
-**Zuletzt erreichter Zustand:** Container `<vmid>` läuft, minimal per `pct enter` erreichbar, noch keine NixOS-Konfiguration über das Bootstrap-Modul hinaus angewendet.
+**Projekt 1 ist abgeschlossen.** Alle 17 Dateien (`00`–`16`) liegen im Repo, `SUMMARY.md`, `GLOSSAR.md` und `QUELLEN.md` sind fortgeschrieben. Der beschriebene Zielzustand: Container `<vmid>` läuft mit statischer `<ip>`, gehärteter Baseline (Key-only-Admin mit passwortlosem sudo, SSH auf Port 40, fail2ban, LDAP per sssd, Firewall nur Port 40 eingehend) und einem bei `<forgejo-url>` registrierten Forgejo-Runner, der Container-Jobs über Podman ausführt. Offen ist nur noch der Projektabschluss.
+
+**Beim Schreiben gefundene und behobene Sachfehler** (relevant für Projekt 2/3, deshalb hier notiert):
+- `--ostype unmanaged` + Nixpkgs-Default `proxmoxLXC.manageNetwork = false` ergaben einen Container ohne IP und ohne DNS; `bootstrap.nix` in Schritt 1 wurde deshalb nachträglich um `manageNetwork = true` und `useDHCP = true` ergänzt. Details in `ENTSCHEIDUNGEN.md`.
+- Schritt 13 hatte einen zweiten, abweichenden Token-Pfad eingeführt, obwohl Schritt 11 `tokenFile` bereits setzt; Schritt 14 verlangte ein Label, das Schritt 11 nie registriert. Beides angeglichen.
 
 ## Projekt 2: Vaultwarden mit Reverse Proxy, Backup & Restore
 
@@ -38,7 +42,7 @@ Ordner: `projekt-2-vaultwarden/` (noch nicht angelegt)
 - [ ] 2. Beide VMs sind über eine disko-Konfiguration deklarativ partitioniert und installiert.
 - [ ] 3. Ein Flake mit zwei `nixosConfigurations` und einem gemeinsamen Baseline-Modul baut für beide Hosts.
 - [ ] 4. Eine private Root-CA signiert die SSH-Host-Zertifikate beider Hosts (Nebenrolle).
-- [ ] 5. sops-age ist mit je einem Host-Key eingerichtet, `.sops.yaml` verweist auf beide (Nebenrolle).
+- [ ] 5. sops-age ist mit je einem Host-Key eingerichtet, `.sops.yaml` verweist auf beide (Nebenrolle). **Kein Schlüssel wird erzeugt** — der vorhandene age-Key des Nutzers ist Admin-/Recovery-Empfänger, die Hosts entschlüsseln über ihre SSH-Host-Key-Identität (getrennte Variante aus Projekt 1, Schritt 15; siehe `ENTSCHEIDUNGEN.md`).
 - [ ] 6. Postgres läuft auf dem DB-Host, deklarativ konfiguriert.
 - [ ] 7. Die DB-Zugangsdaten liegen als sops-Secret vor, nicht im Klartext.
 - [ ] 8. Vaultwarden läuft auf dem App-Host und verbindet sich über das Secret mit der DB.
@@ -67,7 +71,7 @@ Ordner: `projekt-3-fleet/` (noch nicht angelegt)
 - [ ] 7. Prometheus läuft deklarativ auf dem Monitoring-Knoten.
 - [ ] 8. `node-exporter` läuft auf allen Knoten über ein gemeinsames Modul.
 - [ ] 9. Grafana zeigt ein Grundgerüst-Dashboard mit Daten aller Knoten.
-- [ ] 10. sops-age ist auf mehrere Empfänger-Hosts erweitert — Unterschied zu Projekt 2: mehrere statt zwei Ziele.
+- [ ] 10. sops-age ist auf mehrere Empfänger-Hosts erweitert — Unterschied zu Projekt 2: mehrere statt zwei Ziele. Auch hier wird kein Schlüssel erzeugt (siehe `ENTSCHEIDUNGEN.md`); mit jedem zusätzlichen Host kommt ein Empfänger dazu, was `sops updatekeys` zur Routine macht — der Punkt, an dem sich die getrennte Variante gegenüber "ein Schlüssel für alles" auszahlt.
 - [ ] 11. Eine CI-Pipeline baut jede Host-Konfiguration vor einem Merge und bricht bei Fehlern ab.
 - [ ] 12. Nach einem Merge auf `main` rollt dieselbe Pipeline die Änderung automatisch auf die Flotte aus.
 - [ ] 13. Ein weiterer Knoten ist allein durch Repo-Eintrag plus `nixos-anywhere`-Lauf hinzugefügt, als Reproduzierbarkeits-Nachweis.
@@ -79,4 +83,20 @@ Ordner: `projekt-3-fleet/` (noch nicht angelegt)
 
 ## Nächster Schritt insgesamt
 
-Projekt 1, Schritt 2 (Flake-Grundgerüst + `nixos-rebuild` von innen).
+Projekt 2, Schritt 0 (Architekturüberblick und Platzhaltertabelle für
+Vaultwarden: App-Host, DB-Host, interne Domain). Ordner
+`projekt-2-vaultwarden/` ist noch anzulegen.
+
+Aus Projekt 1 mitzunehmen:
+
+- Die Baseline aus `modules/baseline/` wird übernommen; zu erklären ist
+  nur der Unterschied (VM statt LXC, `disko` statt `pct create`-Skript).
+  Der LXC-Sonderfall aus `ENTSCHEIDUNGEN.md` — `--ostype unmanaged` plus
+  `proxmoxLXC.manageNetwork` — entfällt dort ersatzlos.
+- Das Muster "Zugangsdaten außerhalb von Repo und Store" (Schritt 8 und
+  13) wird in Projekt 2 durchgängig durch sops-age ersetzt; Schritt 15
+  ist der Vorgriff darauf und kann direkt referenziert werden.
+- Beim parallelen Schreiben mehrerer Schritte: Schritte, die sich
+  dieselbe Konfigurationsdatei teilen, gehören zusammen bearbeitet.
+  In Projekt 1 sind genau dort zwei Widersprüche entstanden (Token-Pfad,
+  Runner-Label), die erst die Durchsicht gefunden hat.

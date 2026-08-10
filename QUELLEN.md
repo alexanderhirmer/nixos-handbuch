@@ -129,3 +129,97 @@ Laufend gepflegt, primär nach Kapitel sortiert. Der Anhang im fertigen Buch kom
 - Elis Hirwing, NixOS: tmpfs as root – https://elis.nu/blog/2020/05/nixos-tmpfs-as-root/
 - hanckmann.com, Nixos and Erasing My Darlings (Praxisbeispiel) – https://hanckmann.com/posts/20230104-nixos-and-erasing-my-darlings/
 - b.tuxes.uk, Three Years of Ephemeral NixOS – https://b.tuxes.uk/three-years-of-ephemeral-nixos.html
+
+## Teil II, Projekt 1 – Gehärteter Forgejo-Runner-LXC
+
+### Schritt 1
+
+- Proxmox-Quellcode, `pve-container`, `src/PVE/LXC/Setup/Unmanaged.pm` (leere `setup_network`/`set_hostname`/`set_dns`-Methoden) – https://github.com/proxmox/pve-container/blob/master/src/PVE/LXC/Setup/Unmanaged.pm
+- Nixpkgs-Quellcode, `nixos/modules/virtualisation/proxmox-lxc.nix` (Branch `release-26.05`; Default-Verhalten von `manageNetwork`/`manageHostName`, auch Grundlage für Schritt 2 und 10) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/virtualisation/proxmox-lxc.nix
+
+### Schritt 2
+
+- Proxmox-Quellcode, `pve-container`, `src/PVE/CLI/pct.pm` (Kommandotabelle für `push`/`pull`, Einschränkung "can only push files to a running CT") – https://github.com/proxmox/pve-container/blob/master/src/PVE/CLI/pct.pm
+- Nixpkgs-Quellcode, `nixos/modules/tasks/network-interfaces.nix` (Branch `release-26.05`; `networking.defaultGateway` als String oder Options-Set) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/tasks/network-interfaces.nix
+
+### Schritt 3
+
+- Nixpkgs-Quellcode, `nixos/modules/config/users-groups.nix` (Branch `release-26.05`; `allowsLogin`-Funktion, `hashedPassword`-Beschreibung, Lockout-Assertion; auch Grundlage für Schritt 5 und 8) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/config/users-groups.nix
+- Nixpkgs-Quellcode, `nixos/modules/config/update-users-groups.pl` (Branch `release-26.05`; `/etc/shadow`-Erzeugung, `"!"`-Default bei `mutableUsers = false`) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/config/update-users-groups.pl
+
+### Schritt 4
+
+- Nixpkgs-Quellcode, `nixos/modules/security/sudo.nix` (Branch `release-26.05`; Default-Regeln für `root`/`wheel`, `wheelNeedsPassword`, `extraRules`-Beschreibung, Rendering nach `/etc/sudoers`) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/security/sudo.nix
+
+### Schritt 5
+
+- Nixpkgs-Quellcode, `nixos/modules/services/networking/ssh/sshd.nix` (Branch `release-26.05`; `ports`, `openFirewall`, `settings.*`, `extraConfig`-Reihenfolge, `Type = "notify-reload"`; auch Grundlage für Schritt 7–9) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/services/networking/ssh/sshd.nix
+- GitHub-Issue NixOS/nixpkgs #12867 ("openssh: Toggling PasswordAuthentication via Match config doesn't work.") – https://github.com/NixOS/nixpkgs/issues/12867
+- GitHub-Issue NixOS/nixpkgs #18503 ("NixOS sshd_config and/or PAM(?) breaks this config") – https://github.com/NixOS/nixpkgs/issues/18503
+- GitHub-Issue NixOS/nixpkgs #12265 (`extraConfig`/`Match`-Reihenfolge) – https://github.com/NixOS/nixpkgs/issues/12265
+
+### Schritt 6
+
+- Nixpkgs-Quellcode, `nixos/modules/config/networking.nix` (Branch `release-26.05`; `/etc/services`-Symlink auf `pkgs.iana-etc`) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/config/networking.nix
+- Nixpkgs-Quellcode, `pkgs/by-name/ia/iana-etc/package.nix` (Branch `release-26.05`; Herkunft der Portdatenbank aus `Mic92/iana-etc`) – https://github.com/NixOS/nixpkgs/blob/release-26.05/pkgs/by-name/ia/iana-etc/package.nix
+- Nixpkgs-Quellcode, `nixos/modules/system/etc/etc.nix` (Branch `release-26.05`; vollständiger Neuaufbau von `/etc` bei jeder Aktivierung) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/system/etc/etc.nix
+
+### Schritt 7
+
+- Nixpkgs-Quellcode, `nixos/modules/services/security/fail2ban.nix` (Branch `release-26.05`; vorkonfiguriertes `sshd`-Jail, `backend = "systemd"`, `ignoreip`, `bantime-increment`) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/services/security/fail2ban.nix
+- NixOS-Discourse, "Fail2ban is not working for sshd with systemd backend" – https://discourse.nixos.org/t/fail2ban-is-not-working-for-sshd-with-systemd-backend/48972
+
+### Schritt 8
+
+- Nixpkgs-Quellcode, `nixos/modules/services/misc/sssd.nix` (Branch `release-26.05`; `system.nssModules`/`system.nssDatabases`, `environmentFile`) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/services/misc/sssd.nix
+- Nixpkgs-Quellcode, `nixos/modules/security/pam.nix` (Branch `release-26.05`; automatischer `pam_sss`-Eintrag, `makeHomeDir`) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/security/pam.nix
+- SSSD-Upstream-Quellcode, `src/man/sssd.conf.5.xml` (Optionen `id_provider`, `auth_provider`, `enumerate`, `cache_credentials`) – https://github.com/SSSD/sssd/blob/master/src/man/sssd.conf.5.xml
+- SSSD-Upstream-Quellcode, `src/man/sssd-ldap.5.xml` (Optionen `ldap_uri`, `ldap_search_base`, `ldap_schema`, `ldap_default_bind_dn`) – https://github.com/SSSD/sssd/blob/master/src/man/sssd-ldap.5.xml
+
+### Schritt 9
+
+- Nixpkgs-Quellcode, `nixos/modules/services/networking/firewall.nix` (Branch `release-26.05`; keine Default-Restriktion für ausgehenden Verkehr) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/services/networking/firewall.nix
+- Nixpkgs-Quellcode, `pkgs/by-name/ip/iptables/package.nix` (Branch `release-26.05`; `nftablesCompat = true`-Default) – https://github.com/NixOS/nixpkgs/blob/release-26.05/pkgs/by-name/ip/iptables/package.nix
+- Community-Recherche (Proxmox-Forum, LXC-Projekt-Diskussionen) zu `CAP_NET_ADMIN` in unprivilegierten Containern und zur Proxmox-Host-Firewall (`firewall=1`, `/etc/pve/firewall/<vmid>.fw`) – nicht gegen `pve.proxmox.com` selbst verifizierbar, im Schritt als ⚠️ Ungeprüft gekennzeichnet.
+
+### Schritt 10
+
+- `containers/storage`-Quellcode, `docs/containers-storage.conf.5.md` (Option `mount_program`, Overlay-Einschränkungen ohne `CAP_SYS_ADMIN`) – https://github.com/containers/storage/blob/main/docs/containers-storage.conf.5.md
+- Nixpkgs-Quellcode, `nixos/modules/services/continuous-integration/gitea-actions-runner.nix` (Branch `release-26.05`; `DOCKER_HOST`/`SupplementaryGroups` bei Podman; auch Grundlage für Schritt 11–14) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/services/continuous-integration/gitea-actions-runner.nix
+- NixOS-Discourse, "Podman/docker in nixos container (ideally in unprivileged one)?" – https://discourse.nixos.org/t/podman-docker-in-nixos-container-ideally-in-unprivileged-one/22909
+- Community-Recherche zu den `pct`-Features `nesting`/`keyctl`/`fuse` – `pve.proxmox.com` nicht erreichbar, mehrere unabhängige Sekundärquellen deckungsgleich, im Schritt als ⚠️ Ungeprüft gekennzeichnet.
+
+### Schritt 11
+
+- Nixpkgs-Quellcode, `nixos/modules/services/continuous-integration/gitea-actions-runner.nix` (Options-Deklaration, beide Assertions, Label-Logik) – siehe Schritt 10.
+- Nixpkgs-Quellcode, `nixos/lib/utils.nix` (Branch `release-26.05`; Funktion `escapeSystemdPath`; auch Grundlage für Schritt 12–13) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/lib/utils.nix
+- Nixpkgs-Quellcode, `lib/modules.nix` (Branch `release-26.05`; Fehlermeldung für Pflichtoptionen ohne Default) – https://github.com/NixOS/nixpkgs/blob/release-26.05/lib/modules.nix
+
+### Schritt 12
+
+- Nixpkgs-Quellcode, `nixos/lib/systemd-unit-options.nix` (Branch `release-26.05`; `unitOption`-Merge-Logik) – https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/lib/systemd-unit-options.nix
+- Nixpkgs-Quellcode, `lib/options.nix` (Branch `release-26.05`; `mergeEqualOption`) – https://github.com/NixOS/nixpkgs/blob/release-26.05/lib/options.nix
+- systemd-Quellcode, `man/systemd.exec.xml` (`EnvironmentFile=`-Semantik, Kommentarzeilen) – https://github.com/systemd/systemd/blob/main/man/systemd.exec.xml
+
+### Schritt 13
+
+- Nixpkgs-Quellcode, `nixos/modules/services/continuous-integration/gitea-actions-runner.nix` – siehe Schritt 10.
+- Nixpkgs-Quellcode, `nixos/lib/utils.nix` – siehe Schritt 11.
+- systemd-Quellcode, `src/core/execute.c` (`exec_context_load_environment()` läuft vor dem Privilegien-Drop auf `DynamicUser`) – https://github.com/systemd/systemd/blob/main/src/core/execute.c
+- Sekundärquellen (Blogs/Zusammenfassungen der unter `forgejo.org` nicht erreichbaren offiziellen Doku "Runner Registration") zu Registrierungs-Scopes (instanzweit/Org/Nutzer/Repo) und zur Wiederverwendbarkeit des Tokens – im Schritt als ⚠️ Ungeprüft gekennzeichnet.
+
+### Schritt 14
+
+- Nixpkgs-Quellcode, `nixos/modules/services/continuous-integration/gitea-actions-runner.nix` (`hostPackages`-Default) – siehe Schritt 10.
+- act_runner-Quellcode (GitHub-Spiegel `focs-gitea/act_runner`, da `gitea.com` blockiert war), `internal/pkg/config/config.example.yaml` (Label-Syntax `<name>:docker://<image>`/`<name>:host`) – https://github.com/focs-gitea/act_runner/blob/main/internal/pkg/config/config.example.yaml
+- Sekundärquellen zu `.forgejo/workflows/`-Vorrang, `DEFAULT_ACTIONS_URL`-Default und einem zitierten Forgejo-Issue (Codeberg `forgejo/forgejo`) zu `DEFAULT_ACTIONS_URL`-Fehlern – `forgejo.org`/`codeberg.org` nicht erreichbar, im Schritt als ⚠️ Ungeprüft gekennzeichnet.
+
+### Schritt 15
+
+- sops-nix (GitHub), Quellcode `pkgs/sops-install-secrets/main.go` (Branch `master`; `key` wirkungslos bei `format = "dotenv"`/`binary`/`ini`, `validateSopsFile`) – https://github.com/Mic92/sops-nix/blob/master/pkgs/sops-install-secrets/main.go
+- sops-nix (GitHub), Modulquellcode `modules/sops/default.nix`/`modules/sops/age.nix` (Options-Beschreibung `key`, `format`-Enum, `sshKeyPaths`-Default aus `services.openssh.hostKeys`) – https://github.com/Mic92/sops-nix (Projekt bereits in Kapitel 10 gelistet)
+- sops-nix (GitHub), `modules/sops/default.nix` – Optionen `sops.age.keyFile` (`type = lib.types.nullOr pathNotInStore`), `sops.age.generateKey` (Default `false`, "the key must already be present at the specified location"), `sops.age.sshKeyPaths` (Default: ed25519-Keys aus `config.services.openssh.hostKeys`) sowie der Assertion-Wortlaut "No key source configured for sops. Either set services.openssh.enable or set sops.age.keyFile or sops.gnupg.home" – https://github.com/Mic92/sops-nix/blob/master/modules/sops/default.nix
+- sops (getsops/sops)-Quellcode, `cmd/sops/main.go` (`--input-type`/`--output-type`-Flags; Unterbefehl `updatekeys`, "update the keys of SOPS files using the config file") – https://github.com/getsops/sops/blob/main/cmd/sops/main.go
+- Eigene Verifikation per `git ls-remote --tags` gegen `github.com/Mic92/sops-nix.git`: keine versionierten Release-Tags vorhanden – Begründung dafür, dass der Pin über `flake.lock` läuft, nicht über einen Tag.
+
+`pve.proxmox.com`, `git.proxmox.com`, `forgejo.org` und `codeberg.org` waren beim Schreiben aus dieser Umgebung heraus nicht erreichbar. Wo möglich, wurden Aussagen stattdessen gegen Quellcode-Spiegel auf GitHub verifiziert (u. a. `github.com/proxmox/pve-container`, `github.com/NixOS/nixpkgs`, `github.com/Mic92/sops-nix`); wo auch das nicht möglich war – insbesondere Forgejo-UI-Texte, Menüpfade und einzelne Proxmox-Optionsdetails –, sind die betroffenen Aussagen in den jeweiligen Schritten als `⚠️ Ungeprüft` markiert.
