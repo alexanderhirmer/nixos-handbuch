@@ -36,8 +36,9 @@ Die Schritte 1–14 haben aus einem leeren Proxmox-Host einen einzelnen, deklara
         ├── container-runtime.nix    Schritt 10, seither unverändert
         ├── forgejo-runner.nix       Schritt 11 angelegt, geändert Schritt 12 (Endzustand der
         │                             Hauptvariante). Schritt 13 ändert diese Datei NICHT.
-        │                             Schritt 15 stellt ihr eine alternative Fassung gegenüber
-        │                             (siehe Exkurs-Abschnitt unten), ersetzt sie aber nicht.
+        │                             Schritt 15 stellt ihr zwei alternative Fassungen gegenüber
+        │                             (Hauptweg und Variante, siehe Exkurs unten), ersetzt sie
+        │                             aber nicht.
         └── runner.env                Schritt 12, seither unverändert (Klartext-Variante)
 ```
 
@@ -55,6 +56,7 @@ Nur relevant, wenn der sops-age-Exkurs (Schritt 15) tatsächlich nachgebaut wird
 - **`/etc/gitea-runner-<runner-name>-token.env`** (Schritt 13) — das Registrierungstoken aus der Forgejo-Weboberfläche, mit `umask 077` angelegt und auf `root:root`/`600` gesetzt. `forgejo-runner.nix` referenziert den Pfad seit Schritt 11 nur als **String** (`tokenFile`), nicht als Nix-Pfad-Literal — genau deshalb landet der Inhalt nie im weltlesbaren Store.
 - **`/var/lib/gitea-runner/<runner-name>/`** — Laufzeitzustand (u. a. die Markerdatei `.runner`), den der Runner-Prozess selbst bei der ersten erfolgreichen Registrierung anlegt (Schritt 13, Prüfkriterium). Kein von Nix verwalteter Pfad; er entsteht und verschwindet mit der Registrierung, nicht mit einem `nixos-rebuild switch`.
 - **`/run/secrets/runner-env`** (Schritt 15, Exkurs) — sops-nix legt den entschlüsselten Klartext in ein `tmpfs`, nie in den Store. Existiert ausschließlich, wenn der Exkurs nachgebaut wurde; in der Hauptvariante (Schritt 12) gibt es diesen Pfad nicht, dort liegt `runner.env` stattdessen als Klartext unter `/nix/store/…-runner.env`.
+- **`/var/lib/sops-nix/key.txt`** (Schritt 15, Exkurs, nur im Hauptweg) — dein privater age-Schlüssel, per `pct push` von der Workstation auf den Container gebracht, `root:root`/`600`. Weder im Repo noch im Store: `sops.age.keyFile` ist als `pathNotInStore` typisiert, ein Store-Pfad würde vom Modulsystem abgelehnt. In der Variante mit getrennten Rollen existiert diese Datei gar nicht — dort bleibt der private Schlüssel auf der Workstation, und der Container nutzt seinen eigenen SSH-Host-Key als abgeleitete Identität.
 - **Die Workflow-Datei aus Schritt 14** (`.forgejo/workflows/runner-test.yaml`) — liegt in einem eigenständigen **Test-Repository auf der Forgejo-Instanz**, nicht in `<repo-root>`. Schritt 14 betont das ausdrücklich: Das NixOS-Infrastruktur-Repo, das diesen Abschluss zusammenfasst, und das Repository, dessen Workflows der Runner ausführt, sind zwei völlig getrennte Orte.
 
 ## 2. Gesammelte Endkonfiguration
@@ -386,19 +388,18 @@ TZ=Europe/Berlin
 
 ### Exkurs: sops-age-Variante (Schritt 15) — Alternative, kein Ersatz
 
-Der Exkurs ersetzt `modules/runner/runner.env` nicht, sondern stellt ihm die folgenden drei Dateien gegenüber. `forgejo-runner.nix` existiert dann effektiv in zwei Fassungen — welche der beiden aktiv ist, entscheidet einzig, was tatsächlich in `<repo-root>/modules/runner/forgejo-runner.nix` steht.
+Der Exkurs ersetzt `modules/runner/runner.env` nicht, sondern stellt ihm die folgenden Dateien gegenüber. Er zeigt dabei **zwei** Wege, die sich nur im `sops.age`-Block unterscheiden: den Hauptweg mit deinem bereits vorhandenen age-Schlüssel und die Variante mit getrennten Rollen. `forgejo-runner.nix` existiert damit in insgesamt drei möglichen Fassungen — welche aktiv ist, entscheidet einzig, was tatsächlich in `<repo-root>/modules/runner/forgejo-runner.nix` steht. In keinem der beiden Wege wird ein age-Schlüssel erzeugt.
 
 ```yaml
-# <repo-root>/.sops.yaml
+# <repo-root>/.sops.yaml — Hauptweg: dein vorhandener Schluessel als einziger Empfaenger
 creation_rules:
   - path_regex: secrets/.*\.env$
     key_groups:
       - age:
-          # Hier die tatsaechliche ssh-to-age-Ausgabe aus Schritt 15, Punkt 2 einsetzen.
-          # Ein age-Empfaenger beginnt mit "age1"; ein Beispielwert waere
-          # hier gefaehrlich, weil er sich kommentarlos kopieren liesse.
-          - age1...
+          - <age-recipient>
 ```
+
+In der Variante kommt darunter ein zweiter Empfänger dazu: die `ssh-to-age`-Ausgabe aus dem SSH-Host-Key des Containers. Konkrete `age1…`-Werte stehen hier bewusst nirgends — ein echt aussehender Empfänger ließe sich kommentarlos kopieren.
 
 ```bash
 # <repo-root>/secrets/runner.env (im Repo nur verschlüsselt abgelegt; hier der Klartext, den `sops` anzeigt)
@@ -411,7 +412,19 @@ TZ=Europe/Berlin
 # <repo-root>/modules/runner/forgejo-runner.nix — ALTERNATIVE (Exkurs Schritt 15), ersetzt die obige Klartext-Fassung
 { config, pkgs, utils, ... }:
 {
-  sops.age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
+  # Hauptweg: dein vorhandener Schluessel, per pct push nach
+  # /var/lib/sops-nix/key.txt gebracht (root:root, 0600).
+  # sshKeyPaths muss explizit leer sein, sonst haengt sops-nix per
+  # Default zusaetzlich den ed25519-Host-Key als zweite Identitaet ein.
+  sops.age = {
+    keyFile = "/var/lib/sops-nix/key.txt";
+    generateKey = false;
+    sshKeyPaths = [ ];
+  };
+  # Variante mit getrennten Rollen -- ersetzt genau den Block darueber:
+  #   sops.age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
+  # Dann liegt kein privater Schluessel auf dem Container, dafuer steht
+  # dessen abgeleitete Identitaet als zweiter Empfaenger in .sops.yaml.
   sops.secrets."runner-env" = {
     sopsFile = ../../secrets/runner.env;
     format = "dotenv";
@@ -484,7 +497,7 @@ TZ=Europe/Berlin
 2. **`:host`-Labels statt reiner Container-Jobs.** Ein zusätzliches Label wie `bare:host` in `forgejo-runner.nix` lässt Jobs direkt im Runner-Container laufen statt in einem gepullten Image — kein Pull, dafür explizite Pflege von `instances.<name>.hostPackages` (Default siehe Schritt 11/14). Sinnvoll für Jobs, die nur ohnehin vorhandene Werkzeuge brauchen.
 3. **Cache-/Registry-Spiegel im internen Netz.** Schritt 14 musste `node:20-bookworm` manuell mit `podman pull` vorab cachen, weil das Netz laut Projektrahmen ohne öffentlichen Zugriff auskommt. Ein interner OCI-Registry-Spiegel macht diesen manuellen Schritt überflüssig und beschleunigt jeden Neustart mit leerem Storage.
 4. **Monitoring des Runners.** Bislang liefert nur `journalctl -u gitea-runner-*` (Schritt 11/13) Einblick. Ein Metriken-Exporter, ergänzt um eine eng gefasste zusätzliche Firewall-Freigabe für den Scrape-Port (Schritt 9 als Vorlage: gezielt ein weiterer `allowedTCPPorts`-Eintrag statt einer pauschalen Öffnung), macht Jobdauer und Neustart-Zyklen sichtbar, statt sie erst im Fehlerfall zu suchen.
-5. **Deklaratives Secrets-Management für alle Werte.** Schritt 15 verschlüsselt nur `runner.env`; das LDAP-Bind-Passwort (Schritt 8, Warnbox zu `environmentFile`) und die Token-Datei (Schritt 13) liegen weiterhin als Klartext außerhalb des Store. Beide ließen sich nach demselben sops-age-Muster (eigener `sops.secrets`-Eintrag, Ziel-Option auf `config.sops.secrets."…".path`) verschlüsseln — der konsequente nächste Schritt, den Projekt 2 laut `ENTSCHEIDUNGEN.md` für echte Zugangsdaten ohnehin geht.
+5. **Deklaratives Secrets-Management für alle Werte.** Schritt 15 verschlüsselt nur `runner.env`; das LDAP-Bind-Passwort (Schritt 8, Warnbox zu `environmentFile`) und die Token-Datei (Schritt 13) liegen weiterhin als Klartext außerhalb des Store. Beide ließen sich nach demselben sops-age-Muster (eigener `sops.secrets`-Eintrag, Ziel-Option auf `config.sops.secrets."…".path`) verschlüsseln — der konsequente nächste Schritt, den Projekt 2 laut `ENTSCHEIDUNGEN.md` für echte Zugangsdaten ohnehin geht. Wer diese Stufe zündet, sollte zugleich vom Hauptweg auf die Variante mit getrennten Rollen wechseln: Je mehr Secrets an einem einzigen, auf dem Host liegenden Schlüssel hängen, desto teurer wird ein kompromittierter Host — und spätestens beim zweiten Host teilen sich beide denselben Generalschlüssel, was die Trennung zwischen ihnen aufhebt.
 
 ## 5. Teardown
 
@@ -522,4 +535,4 @@ $ rm /var/lib/vz/template/cache/nixos-<hostname>-bootstrap.tar.xz
 
 **6. LXC-Features zurücksetzen.** Aus Schritt 10s Rückweg dokumentiert, hier der Vollständigkeit halber: `pct set <vmid> --features nesting=0,keyctl=0,fuse=0` gefolgt von `pct reboot <vmid>`. Praktisch ist dieser Befehl nach Schritt 4 bereits gegenstandslos — `pct destroy` entfernt die komplette Container-Konfiguration inklusive aller Feature-Flags. Relevant wird er nur in einem abweichenden Szenario: Wenn `<vmid>` **nicht** zerstört, sondern nur auf den Stand vor Schritt 10 zurückgesetzt werden soll (z. B. um denselben Container ohne Runner weiterzuverwenden), gehört dieser Befehl **vor** einen eventuellen `pct destroy` — dann muss der Container beim Ausführen noch existieren.
 
-Von `<repo-root>` selbst nimmt dieser Teardown nichts weg: Das Repo enthält an keiner Stelle Zugangsdaten (Token, LDAP-Bind-Passwort liegen beide außerhalb, siehe Abschnitt 1) und lässt sich unverändert für einen neuen Container-Anlauf wiederverwenden.
+Von `<repo-root>` selbst nimmt dieser Teardown nichts weg: Das Repo enthält an keiner Stelle Zugangsdaten (Token, LDAP-Bind-Passwort liegen beide außerhalb, siehe Abschnitt 1) und lässt sich unverändert für einen neuen Container-Anlauf wiederverwenden. `secrets/runner.env` und `.sops.yaml` aus dem Exkurs dürfen ebenfalls liegen bleiben — verschlüsselt und ohne Bezug zu diesem Container. Wurde der Hauptweg nachgebaut, verschwindet mit `pct destroy` auch die Kopie deines privaten age-Schlüssels unter `/var/lib/sops-nix/key.txt`; das Original auf deiner Workstation (`<age-key-file>`) bleibt davon selbstverständlich unberührt und wird für den nächsten Anlauf wieder gebraucht.
