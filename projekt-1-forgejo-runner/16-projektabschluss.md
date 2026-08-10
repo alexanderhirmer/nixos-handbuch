@@ -56,13 +56,13 @@ Nur relevant, wenn der sops-age-Exkurs (Schritt 15) tatsächlich nachgebaut wird
 
 ### Was bewusst nicht im Repo liegt
 
-- **`/etc/gitea-runner-<runner-name>-token.env`** (Schritt 13) — das Registrierungstoken aus der Forgejo-Weboberfläche, mit `umask 077` angelegt und auf `root:root`/`600` gesetzt. `forgejo-runner.nix` referenziert den Pfad seit Schritt 11 nur als **String** (`tokenFile`), nicht als Nix-Pfad-Literal — genau deshalb landet der Inhalt nie im weltlesbaren Store. Schritt 15 zeigt dafür eine sops-Alternative: `tokenFile` zeigt dann auf `config.sops.secrets."runner-token".path` statt auf diesen Pfad.
-- **`/var/lib/gitea-runner/<runner-name>/`** — Laufzeitzustand (u. a. die Markerdatei `.runner`), den der Runner-Prozess selbst bei der ersten erfolgreichen Registrierung anlegt (Schritt 13, Prüfkriterium). Kein von Nix verwalteter Pfad; er entsteht und verschwindet mit der Registrierung, nicht mit einem `nixos-rebuild switch`.
-- **`/run/secrets/runner-env`** (Schritt 15, Exkurs) — sops-nix legt den entschlüsselten Klartext von `secrets/runner.env` in ein `tmpfs`, nie in den Store. Existiert nur, wenn der Exkurs nachgebaut wurde — dann zusätzlich zur Klartextdatei aus Schritt 12 unter `/nix/store/…-runner.env`, nicht an ihrer Stelle: `forgejo-runner.nix` bindet beide gleichzeitig als `EnvironmentFile`-Liste, mit unterschiedlichem Inhalt.
-- **`/run/secrets/sssd-env`** (Schritt 15, Exkurs, zweiter Fall) — enthält das entschlüsselte `secrets/sssd.env` (Bind-DN, Bind-Passwort), ebenfalls `tmpfs`. `services.sssd.environmentFile` bindet die Datei nicht als `EnvironmentFile=` am Unit, sondern `preStart` ersetzt damit die `$SSSD_*`-Platzhalter in `sssd.conf` per `envsubst`, bevor sssd startet.
-- **`/run/secrets/runner-token`** (Schritt 15, Exkurs, dritter Fall) — enthält das entschlüsselte `secrets/runner-token.env`; `tokenFile` zeigt in dieser Alternative hierauf statt auf `/etc/gitea-runner-<runner-name>-token.env`.
-- **`/var/lib/sops-nix/key.txt`** (Schritt 15, Exkurs, nur im Hauptweg) — dein privater age-Schlüssel, per `pct push` von der Workstation auf den Container gebracht, `root:root`/`600`. Weder im Repo noch im Store: `sops.age.keyFile` ist als `pathNotInStore` typisiert, ein Store-Pfad würde vom Modulsystem abgelehnt. In der Variante mit getrennten Rollen existiert diese Datei gar nicht — dort bleibt der private Schlüssel auf der Workstation, und der Container nutzt seinen eigenen SSH-Host-Key als abgeleitete Identität.
-- **Die Workflow-Datei aus Schritt 14** (`.forgejo/workflows/runner-test.yaml`) — liegt in einem eigenständigen **Test-Repository auf der Forgejo-Instanz**, nicht in `<repo-root>`. Schritt 14 betont das ausdrücklich: Das NixOS-Infrastruktur-Repo, das diesen Abschluss zusammenfasst, und das Repository, dessen Workflows der Runner ausführt, sind zwei völlig getrennte Orte.
+- **`/etc/gitea-runner-<runner-name>-token.env`** (Schritt 13) — das Registrierungstoken aus der Forgejo-Weboberfläche, `umask 077`, `root:root`/`600`. `forgejo-runner.nix` referenziert den Pfad seit Schritt 11 nur als **String** (`tokenFile`), nie als Pfad-Literal — deshalb landet der Inhalt nie im Store. Schritt 15 zeigt eine sops-Alternative: `tokenFile` zeigt dann auf `config.sops.secrets."runner-token".path`.
+- **`/var/lib/gitea-runner/<runner-name>/`** — Laufzeitzustand (u. a. Markerdatei `.runner`), den der Runner-Prozess bei erster erfolgreicher Registrierung anlegt (Schritt 13, Prüfkriterium). Kein von Nix verwalteter Pfad; entsteht/verschwindet mit der Registrierung, nicht mit `nixos-rebuild switch`.
+- **`/run/secrets/runner-env`** (Schritt 15, Exkurs) — sops-nix legt den entschlüsselten Klartext von `secrets/runner.env` in ein `tmpfs`. Existiert nur, wenn der Exkurs nachgebaut wurde — dann zusätzlich zur Klartextdatei aus Schritt 12 im Store, nicht an ihrer Stelle: `forgejo-runner.nix` bindet beide gleichzeitig, mit unterschiedlichem Inhalt.
+- **`/run/secrets/sssd-env`** (Schritt 15, Exkurs, zweiter Fall) — enthält das entschlüsselte `secrets/sssd.env` (Bind-DN, -Passwort), ebenfalls `tmpfs`. Nicht als `EnvironmentFile=` am Unit gebunden: `preStart` ersetzt damit die `$SSSD_*`-Platzhalter in `sssd.conf` per `envsubst`.
+- **`/run/secrets/runner-token`** (Schritt 15, Exkurs, dritter Fall) — enthält das entschlüsselte `secrets/runner-token.env`; `tokenFile` zeigt hier darauf statt auf `/etc/gitea-runner-<runner-name>-token.env`.
+- **`/var/lib/sops-nix/key.txt`** (Schritt 15, Exkurs, nur im Hauptweg) — dein privater age-Schlüssel, per `pct push` auf den Container gebracht, `root:root`/`600`. Weder im Repo noch im Store: `keyFile` ist als `pathNotInStore` typisiert, ein Store-Pfad würde abgelehnt. In der Variante mit getrennten Rollen existiert diese Datei gar nicht — der Schlüssel bleibt auf der Workstation, der Container nutzt seinen SSH-Host-Key als abgeleitete Identität.
+- **Die Workflow-Datei aus Schritt 14** (`.forgejo/workflows/runner-test.yaml`) — liegt in einem eigenständigen **Test-Repository auf der Forgejo-Instanz**, nicht in `<repo-root>`: Infrastruktur-Repo und das Repository, dessen Workflows der Runner ausführt, sind zwei getrennte Orte.
 
 ## 2. Gesammelte Endkonfiguration
 
@@ -393,7 +393,7 @@ TZ=Europe/Berlin
 
 ### Exkurs: sops-age-Variante (Schritt 15) — Alternative, kein Ersatz
 
-Der Exkurs ersetzt `modules/runner/runner.env` nicht, sondern ergänzt sie: `forgejo-runner.nix` bindet ab Schritt 15 Klartext- und sops-Fassung gleichzeitig als `EnvironmentFile`-Liste — unkritische Werte bleiben im Store, geheime wandern nach `secrets/runner.env`. Dasselbe Muster schließt zwei weitere Lücken: das LDAP-Bind-Passwort aus Schritt 8 (`secrets/sssd.env`, über `services.sssd.environmentFile`) und das Registrierungstoken aus Schritt 13 (`secrets/runner-token.env`, über `tokenFile`). In allen drei Fällen unterscheiden sich Hauptweg und Variante mit getrennten Rollen nur im `sops.age`-Block; ein age-Schlüssel wird in keinem der beiden Wege erzeugt.
+Der Exkurs ersetzt `modules/runner/runner.env` nicht, sondern ergänzt sie: `forgejo-runner.nix` bindet Klartext- und sops-Fassung gleichzeitig — unkritisch im Store, geheim in `secrets/runner.env`. Dasselbe Muster schließt zwei weitere Lücken: das LDAP-Bind-Passwort aus Schritt 8 (`secrets/sssd.env`) und das Registrierungstoken aus Schritt 13 (`secrets/runner-token.env`). Hauptweg und Variante mit getrennten Rollen unterscheiden sich in allen drei Fällen nur im `sops.age`-Block; ein age-Schlüssel wird dabei nie erzeugt.
 
 ```yaml
 # <repo-root>/.sops.yaml — Hauptweg: dein vorhandener Schluessel als einziger Empfaenger
@@ -404,7 +404,7 @@ creation_rules:
           - <age-recipient>
 ```
 
-In der Variante kommt darunter ein zweiter Empfänger dazu: die `ssh-to-age`-Ausgabe aus dem SSH-Host-Key des Containers. Konkrete `age1…`-Werte stehen hier bewusst nirgends — ein echt aussehender Empfänger ließe sich kommentarlos kopieren. `path_regex: secrets/.*\.env$` erfasst alle drei folgenden Dateien gleichermaßen, ohne Änderung an `.sops.yaml`.
+In der Variante kommt darunter ein zweiter Empfänger dazu: die `ssh-to-age`-Ausgabe aus dem SSH-Host-Key des Containers — bewusst ohne `age1…`-Beispielwert, den man kommentarlos kopieren könnte. `path_regex: secrets/.*\.env$` erfasst alle drei folgenden Dateien gleich, ohne weitere Änderung an `.sops.yaml`.
 
 ```bash
 # <repo-root>/secrets/runner.env (im Repo nur verschlüsselt abgelegt; hier der Klartext, den `sops` anzeigt)
@@ -524,7 +524,7 @@ Das Registrierungstoken aus Schritt 13 — Schritt 13 bleibt daneben gültig, di
 }
 ```
 
-Anders als bei `runner-env`/`runner-token`: `environmentFile` landet nicht als `EnvironmentFile=` am Unit, `preStart` ersetzt die `$SSSD_*`-Platzhalter per `envsubst` in `sssd.conf`, bevor sssd startet — dieselbe sops-Quelle, anderer Verwendungsweg.
+Anders als bei `runner-env`/`runner-token` landet `environmentFile` nicht als `EnvironmentFile=` am Unit: `preStart` ersetzt die `$SSSD_*`-Platzhalter per `envsubst` in `sssd.conf`, bevor sssd startet.
 
 ```nix
 # <repo-root>/flake.nix — ALTERNATIVE (Exkurs Schritt 15), ersetzt die Hauptvariante oben
@@ -549,7 +549,7 @@ Anders als bei `runner-env`/`runner-token`: `environmentFile` landet nicht als `
 }
 ```
 
-> 💡 **Nice to know:** Der Unterschied zwischen Nix-**Pfad**-Literal und **String** gilt unverändert: `"${./runner.env}"` kopiert beim Bauen in den weltlesbaren Store, `config.sops.secrets."runner-env".path` bleibt zur Auswertungszeit nur ein String, der erst beim Aktivieren auf `/run/secrets/runner-env` (`tmpfs`) zeigt. Kein Entweder-oder ist seit Schritt 15 aber mehr die `EnvironmentFile`-Liste selbst — Klartext- und sops-Fassung von `runner.env` stehen dort gleichzeitig, mit unterschiedlichem Inhalt. Entweder-oder bleibt dagegen `tokenFile`: entweder der Pfad aus Schritt 13 oder `config.sops.secrets."runner-token".path`, nie beides.
+> 💡 **Nice to know:** Pfad-Literal vs. String gilt unverändert: `"${./runner.env}"` kopiert beim Bauen in den Store, `config.sops.secrets."runner-env".path` bleibt bis zur Aktivierung nur ein String, der dann auf `/run/secrets/runner-env` (`tmpfs`) zeigt. Kein Entweder-oder ist seit Schritt 15 aber die `EnvironmentFile`-Liste selbst — Klartext- und sops-Fassung stehen dort gleichzeitig, mit unterschiedlichem Inhalt. Entweder-oder bleibt `tokenFile`: der Pfad aus Schritt 13 oder `config.sops.secrets."runner-token".path`, nie beides.
 
 ## 3. Was du jetzt kannst
 
@@ -571,7 +571,7 @@ Anders als bei `runner-env`/`runner-token`: `environmentFile` landet nicht als `
 2. **`:host`-Labels statt reiner Container-Jobs.** Ein zusätzliches Label wie `bare:host` in `forgejo-runner.nix` lässt Jobs direkt im Runner-Container laufen statt in einem gepullten Image — kein Pull, dafür explizite Pflege von `instances.<name>.hostPackages` (Default siehe Schritt 11/14). Sinnvoll für Jobs, die nur ohnehin vorhandene Werkzeuge brauchen.
 3. **Cache-/Registry-Spiegel im internen Netz.** Schritt 14 musste `node:20-bookworm` manuell mit `podman pull` vorab cachen, weil das Netz laut Projektrahmen ohne öffentlichen Zugriff auskommt. Ein interner OCI-Registry-Spiegel macht diesen manuellen Schritt überflüssig und beschleunigt jeden Neustart mit leerem Storage.
 4. **Monitoring des Runners.** Bislang liefert nur `journalctl -u gitea-runner-*` (Schritt 11/13) Einblick. Ein Metriken-Exporter, ergänzt um eine eng gefasste zusätzliche Firewall-Freigabe für den Scrape-Port (Schritt 9 als Vorlage: gezielt ein weiterer `allowedTCPPorts`-Eintrag statt einer pauschalen Öffnung), macht Jobdauer und Neustart-Zyklen sichtbar, statt sie erst im Fehlerfall zu suchen.
-5. **Mehrere Hosts am selben sops-age-Schema.** Schritt 15 verschlüsselt alle drei Secrets dieses Projekts über den Hauptweg — deinen einen vorhandenen age-Schlüssel als einzigen Empfänger. Das trägt für genau einen Container. Kommt ein zweiter hinzu, lohnt sich der Wechsel zur Variante mit getrennten Rollen: Der private Schlüssel bleibt auf der Workstation, jeder Container bekommt über seinen eigenen SSH-Host-Key eine eigene, abgeleitete Identität in `.sops.yaml`. Der Gewinn wächst mit jedem weiteren Host — ein kompromittierter Container gibt dann nur seine eigene Identität preis, nicht den Generalschlüssel für alle. Projekt 2/3 gehen diesen Weg von Anfang an.
+5. **Mehrere Hosts am selben sops-age-Schema.** Schritt 15 verschlüsselt alle drei Secrets über den Hauptweg — deinen einen age-Schlüssel als einzigen Empfänger. Das trägt für genau einen Container. Kommt ein zweiter hinzu, lohnt sich der Wechsel zur Variante mit getrennten Rollen: Der private Schlüssel bleibt auf der Workstation, jeder Container bekommt über seinen eigenen SSH-Host-Key eine abgeleitete Identität in `.sops.yaml`. Ein kompromittierter Container gibt dann nur seine eigene Identität preis, nicht den Generalschlüssel für alle. Projekt 2/3 gehen diesen Weg von Anfang an.
 
 ## 5. Teardown
 
