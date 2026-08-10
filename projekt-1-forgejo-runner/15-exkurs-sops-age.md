@@ -7,11 +7,11 @@ weight: 15
 
 ## Ziel
 
-`<repo-root>/secrets/runner.env` liegt sops-age-verschlüsselt neben dem Klartext aus Schritt 12: im Hauptweg entschlüsselt durch deinen age-Schlüssel, in einer Variante durch einen aus dem SSH-Host-Key abgeleiteten Zweitschlüssel; `forgejo-runner.nix` zeigt am Ende auf `/run/secrets/…`. Dasselbe Muster schließt danach die Lücke aus Schritt 8: `secrets/sssd.env` verschlüsselt LDAP-URI, Bind-DN und Bind-Passwort, `ldap.nix` zeigt über `services.sssd.environmentFile` darauf.
+`<repo-root>/secrets/runner.env` liegt sops-age-verschlüsselt neben dem Klartext `modules/runner/runner.env` aus Schritt 12 – kein Duplikat, sondern eigener, tatsächlich geheimer Inhalt; `forgejo-runner.nix` bindet am Ende beide gleichzeitig. Im Hauptweg entschlüsselt dein age-Schlüssel, in einer Variante ein aus dem SSH-Host-Key abgeleiteter Zweitschlüssel. Dasselbe Muster schließt danach zwei weitere Lücken: das LDAP-Bind-Passwort aus Schritt 8 und das Registrierungs-Token aus Schritt 13.
 
 ## Voraussetzung
 
-Teil I, Kapitel 10 ist gelesen – sops-nix, age vs. GPG, `/run/secrets/…` werden vorausgesetzt. Du besitzt ein age-Schlüsselpaar (`<age-recipient>`, `<age-key-file>`) – dieser Exkurs erzeugt keins, weder per `age-keygen` noch über `sops.age.generateKey`. Schritt 5 (SSH-Host-Key, nur Variante) und 12/13 sind abgeschlossen: `forgejo-runner.nix` hat seit Schritt 12 `{ pkgs, utils, ... }:` im Kopf und `EnvironmentFile = [ "${./runner.env}" ];`, gemergt mit `tokenFile` aus Schritt 11. Schritt 8 ist abgeschlossen: `ldap.nix` bindet mit `ldap_default_bind_dn`/`ldap_default_authtok` im Klartext – die Lücke aus dessen Warnbox.
+Teil I, Kapitel 10 ist gelesen – sops-nix, age vs. GPG, `/run/secrets/…` werden vorausgesetzt. Du besitzt ein age-Schlüsselpaar (`<age-recipient>`, `<age-key-file>`) – dieser Exkurs erzeugt keins. Schritt 5 (SSH-Host-Key, nur Variante) und 12/13 sind abgeschlossen: `forgejo-runner.nix` hat seit Schritt 12 `{ pkgs, utils, ... }:` im Kopf, `EnvironmentFile = [ "${./runner.env}" ];`, gemergt mit `tokenFile` aus Schritt 11. Schritt 8 ist abgeschlossen: `ldap.nix` bindet mit `ldap_default_bind_dn`/`ldap_default_authtok` im Klartext – die Lücke aus dessen Warnbox.
 
 ## Durchführung
 
@@ -51,9 +51,11 @@ $ sops updatekeys secrets/runner.env
 
 `forgejo-runner.nix` setzt in dieser Variante `sops.age.sshKeyPaths` statt `keyFile`/`generateKey` (Diff siehe "Dateien").
 
-**Die Abwägung dahinter.** Der Hauptweg hat einen Empfänger, kein `sops updatekeys` beim Neuaufsetzen, ist am einfachsten – der Preis: Der private Schlüssel liegt auf jedem Zielsystem, das ihn nutzt, und wer dort Root hat, hat damit Zugriff auf *alle* damit verschlüsselten Secrets, nicht nur die dieses Containers. Die Variante kostet mehr Pflege – zwei Empfänger, `sops updatekeys` nach jedem Neuaufsetzen –, aber der Schlüssel verlässt die Workstation nie; ein kompromittierter Container gibt nur seine eigene Identität preis. Für einen Host wie hier ist der Hauptweg vertretbar; bei mehreren Hosts mit demselben Empfänger kippt das – Projekt 2 und 3 gehen den Weg der Variante.
+**Die Abwägung dahinter.** Der Hauptweg hat einen Empfänger, kein `sops updatekeys` beim Neuaufsetzen – der Preis: Der private Schlüssel liegt auf jedem Zielsystem, das ihn nutzt, und wer dort Root hat, hat Zugriff auf *alle* damit verschlüsselten Secrets, nicht nur die dieses Containers. Die Variante kostet mehr Pflege, aber der Schlüssel verlässt die Workstation nie; ein kompromittierter Container gibt nur seine eigene Identität preis. Für einen Host wie hier ist der Hauptweg vertretbar; bei mehreren Hosts mit demselben Empfänger kippt das – Projekt 2/3 gehen die Variante.
 
-**5. Zweiter Fall: das Bind-Passwort aus Schritt 8.** `<ldap-uri>` und `<ldap-base-dn>` sind keine Geheimnisse im kryptografischen Sinn – in jeder LDAP-Umgebung ohnehin auffindbar, im Buch ohnehin nur Platzhalter. Das Bind-Passwort dagegen ist eines: das Secret, um das es der Warnbox in Schritt 8 eigentlich ging. Alle drei trotzdem gemeinsam aus dem Store zu halten hat einen dritten Grund: Sie sind standortspezifisch, das Repo soll die Topologie der eigenen Umgebung nicht nach außen tragen. Das Muster von Punkt 1–4 bleibt unverändert – verschlüsseltes `secrets/*.env`, ein `sops.secrets`-Eintrag, `sops.age` bereits systemweit gesetzt (Punkt 4), `flake.nix` unverändert. Anders ist nur das Ziel: statt `EnvironmentFile` am Runner-Unit `services.sssd.environmentFile`, mit Platzhaltern mitten in der `sssd.conf` (Diff siehe "Dateien").
+**5. Zweiter Fall: das Bind-Passwort aus Schritt 8.** `<ldap-uri>` und `<ldap-base-dn>` sind keine Geheimnisse im kryptografischen Sinn – in jeder LDAP-Umgebung auffindbar, im Buch nur Platzhalter. Das Bind-Passwort dagegen ist eines: das Secret aus der Warnbox in Schritt 8. Alle drei bleiben trotzdem gemeinsam aus dem Store – standortspezifisch, soll das Repo die Topologie der eigenen Umgebung nicht preisgeben. Das Muster von Punkt 1–4 bleibt; anders ist nur das Ziel: statt `EnvironmentFile` am Runner-Unit `services.sssd.environmentFile` mit Platzhaltern in der `sssd.conf` (Diff siehe "Dateien").
+
+**6. Dritter Fall: das Token aus Schritt 13.** Schritt 13 bleibt korrekt – der Weg ganz ohne sops. Dieser Exkurs bietet eine Alternative im selben Muster: `tokenFile` zeigt statt auf `/etc/gitea-runner-<runner-name>-token.env` auf `config.sops.secrets."runner-token".path` (Diff siehe "Dateien").
 
 ## Dateien
 
@@ -68,17 +70,16 @@ creation_rules:
           - <age-recipient>
 ```
 
-`<repo-root>/secrets/runner.env` (neu, verschlüsselt – Klartext identisch mit Schritt 12):
+`<repo-root>/secrets/runner.env` (neu, verschlüsselt – anderer Inhalt als `modules/runner/runner.env`):
 
 ```bash
-RUNNER_ENVIRONMENT=produktion
-RUNNER_SITE=rz-intern
-TZ=Europe/Berlin
+REGISTRY_MIRROR_USER=ci-mirror
+REGISTRY_MIRROR_PASSWORD=<registry-mirror-passwort>
 ```
 
-Im Repo liegt nur die verschlüsselte Fassung. `dotenv` verschlüsselt nur die *Werte* – Variablennamen bleiben lesbar, ein `git diff` zeigt also, *welcher* Eintrag sich änderte, nicht wie. `format = "binary"` wäre ein undurchsichtiger Block; möglich, kostet aber diese Lesbarkeit.
+Zugangsdaten für den in Schritt 14 erwähnten internen Registry-Spiegel – ein plausibles Beispiel für einen echten Geheimwert. `RUNNER_ENVIRONMENT`/`RUNNER_SITE`/`TZ` aus Schritt 12 bleiben unverändert in der Klartextdatei: unkritisch, im `git diff` lesbar. Kriterium: unkritisch → Klartextdatei, geheim → sops – nicht "alles, was mit der Umgebung zu tun hat". Im Repo liegt von `secrets/runner.env` nur die verschlüsselte Fassung; `dotenv` verschlüsselt nur die *Werte*.
 
-> 💡 **Nice to know:** Die Options-Beschreibung von `sops.secrets.<name>.key` legt eine Falle aus: Sie sagt, der Schlüssel werde "in der sops-Datei nachgeschlagen", der Default sei der Name des Secrets, und `""` bedeute "whole file" – man könnte also meinen, hier müsse zwingend `key = "";` stehen, sonst suche sops-nix einen Eintrag namens `runner-env` *innerhalb* der Datei. Für `dotenv` stimmt das nicht: Im Go-Quellcode landet `dotenv` – zusammen mit `binary` und `ini` – in dem Zweig, der immer den gesamten entschlüsselten Inhalt übernimmt, und die Schlüsselprüfung überspringt diese drei Formate ausdrücklich. `key` ist hier also wirkungslos, nicht Pflicht. Nachgeschlagen wird nur bei `yaml` und `json`.<sup>2</sup>
+> 💡 **Nice to know:** Die Options-Beschreibung von `sops.secrets.<name>.key` legt eine Falle aus: Der Schlüssel werde "in der sops-Datei nachgeschlagen", Default sei der Name des Secrets, `""` bedeute "whole file" – man könnte meinen, hier müsse zwingend `key = "";` stehen, sonst suche sops-nix einen Eintrag namens `runner-env` *innerhalb* der Datei. Für `dotenv` stimmt das nicht: Im Go-Quellcode landet `dotenv` – mit `binary` und `ini` – im Zweig, der immer den gesamten entschlüsselten Inhalt übernimmt; die Schlüsselprüfung überspringt diese drei Formate. `key` ist hier wirkungslos – nachgeschlagen wird nur bei `yaml`/`json`.<sup>2</sup>
 
 `<repo-root>/modules/runner/forgejo-runner.nix` (geändert, Hauptweg):
 
@@ -98,14 +99,26 @@ Im Repo liegt nur die verschlüsselte Fassung. `dotenv` verschlüsselt nur die *
 +    sopsFile = ../../secrets/runner.env;
 +    format = "dotenv";
 +  };
++  sops.secrets."runner-token" = {
++    sopsFile = ../../secrets/runner-token.env;
++    format = "dotenv";
++    restartUnits = [ "gitea-runner-${utils.escapeSystemdPath "<runner-name>"}.service" ];
++  };
 +
    services.gitea-actions-runner = {
      package = pkgs.forgejo-runner;
-     instances."<runner-name>" = { … };
+     instances."<runner-name>" = {
+       enable = true;
+       name = "<runner-name>";
+       url = "<forgejo-url>";
+-      tokenFile = "/etc/gitea-runner-<runner-name>-token.env";
++      tokenFile = config.sops.secrets."runner-token".path;
+       labels = [ "ubuntu-latest:docker://node:20-bookworm" ];
+     };
    };
 
    systemd.services."gitea-runner-${utils.escapeSystemdPath "<runner-name>"}".serviceConfig.EnvironmentFile = [
--    "${./runner.env}"
+     "${./runner.env}"
 +    config.sops.secrets."runner-env".path
    ];
  }
@@ -117,7 +130,7 @@ Die drei Zeilen unter `sops.age`, einzeln:
 - **`generateKey = false;`** – bereits der Default ("key must already be present at the specified location"<sup>3</sup>), hier nur zur Klarheit explizit.
 - **`sshKeyPaths = [ ];`** – muss explizit leer sein: Default sind die ed25519-Keys aus `config.services.openssh.hostKeys`;<sup>3</sup> sonst hängt sops-nix den Host-Key zusätzlich zu `keyFile` ein, und "nur mein Schlüssel zählt" wäre falsch.
 
-`sops.secrets."runner-env"` braucht kein eigenes `mode`/`owner` – Default (`root:root`, `0400`) genügt, wie `tokenFile` in Schritt 13: `EnvironmentFile=` liest root, bevor er zu `DynamicUser`-Nutzer `gitea-runner` wechselt.
+Beide `sops.secrets`-Einträge brauchen kein eigenes `mode`/`owner` – Default (`root:root`, `0400`) genügt, wie `tokenFile` in Schritt 13. `"runner-token"` bekommt zusätzlich `restartUnits`: ohne das erreicht ein in Forgejo erneuertes Token den laufenden Dienst nicht.
 
 `<repo-root>/flake.nix` (geändert):
 
@@ -144,7 +157,7 @@ Die drei Zeilen unter `sops.age`, einzeln:
  }
 ```
 
-Dasselbe Prinzip wie bei `keyFile` oben, für die `.env`: `./runner.env` kopiert als Pfad-Literal in den Store; `config.sops.secrets."runner-env".path` bleibt bis zur Aktivierung ein String, danach zeigt er auf `/run/secrets/runner-env`.<sup>1</sup> `flake.nix` bleibt in der Variante unverändert.
+Dasselbe Prinzip wie bei `keyFile` oben, für die `.env`: `./runner.env` kopiert als Pfad-Literal in den Store; `config.sops.secrets."runner-env".path` bleibt bis zur Aktivierung ein String, danach zeigt er auf `/run/secrets/runner-env`.<sup>1</sup> Beide Zeilen bleiben nebeneinander in der `EnvironmentFile`-Liste – unterschiedliche Variablennamen, kein Konflikt. Bei gleichem Namen gilt: mehrere Dateien werden der Reihe nach gelesen, "the later setting will override the earlier setting"<sup>7</sup> – nützlich zum gezielten Überschreiben, eine Falle bei Tippfehlern. `flake.nix` bleibt in der Variante unverändert.
 
 ### Variante — getrennte Rollen: die abweichenden Stellen
 
@@ -233,8 +246,8 @@ SSSD_LDAP_DEFAULT_AUTHTOK=<bind-passwort>
        cache_credentials = true
        enumerate = false
      '';
++    environmentFile = config.sops.secrets."sssd-env".path;
    };
-+  services.sssd.environmentFile = config.sops.secrets."sssd-env".path;
 +
 +  sops.secrets."sssd-env" = {
 +    sopsFile = ../../secrets/sssd.env;
@@ -248,19 +261,30 @@ SSSD_LDAP_DEFAULT_AUTHTOK=<bind-passwort>
  }
 ```
 
-`services.sssd.environmentFile` landet im Unit als `EnvironmentFile=`, nicht als systemd-Credential – der Quellcode kommentiert das selbst: "We cannot use LoadCredential here because it's not available in ExecStartPre"<sup>5</sup>: `preStart` ersetzt die Platzhalter per `envsubst`, bevor der eigentliche Programmstart beginnt, `LoadCredential` steht dort noch nicht zur Verfügung.
+`services.sssd.environmentFile` landet im Unit als `EnvironmentFile=`, nicht als systemd-Credential – der Quellcode kommentiert das selbst: "We cannot use LoadCredential here because it's not available in ExecStartPre"<sup>5</sup>: `preStart` ersetzt die Platzhalter per `envsubst`, bevor `LoadCredential` überhaupt zur Verfügung stünde.
 
-`restartUnits = [ "sssd.service" ];` sorgt dafür, dass ein geändertes Passwort den laufenden Dienst erreicht – ohne das bliebe die alte Version bis zum nächsten manuellen Neustart aktiv, das Verhalten folgt `systemd.services.<name>.restartTriggers`.<sup>6</sup> Eine eigene `after`-Verdrahtung zu `sssd.service` braucht es nicht: `sops-install-secrets` läuft schon vor regulären Diensten (`wantedBy = [ "sysinit.target" ]`, zusätzlich ein `activationScripts`-Eintrag beim `switch`).<sup>6</sup> Owner/Mode bleiben Default (`root:root`, `0400`) – `sssd` läuft als root, kein `DynamicUser`-Sonderfall wie beim Runner.
+`restartUnits = [ "sssd.service" ];` sorgt dafür, dass ein geändertes Passwort den laufenden Dienst erreicht, analog zu `restartTriggers`.<sup>6</sup> Eine eigene `after`-Verdrahtung braucht es nicht: `sops-install-secrets` läuft schon vor regulären Diensten (`sysinit.target`, plus `activationScripts` beim `switch`).<sup>6</sup> Owner/Mode bleiben Default – `sssd` läuft als root, kein `DynamicUser`-Fall wie beim Runner.
+
+### Dritter Fall: Registrierungs-Token aus Schritt 13
+
+`<repo-root>/secrets/runner-token.env` (neu, verschlüsselt – ersetzt die manuell angelegte `/etc/gitea-runner-<runner-name>-token.env`):
+
+```bash
+TOKEN=<token-aus-weboberflaeche>
+```
+
+`.sops.yaml` bleibt unverändert, `sops.secrets."runner-token"` und die geänderte `tokenFile`-Zeile stehen bereits im Hauptweg-Diff oben. Schritt 13 wird dadurch nicht falsch – er zeigt den Weg ohne sops, dieser Exkurs ersetzt ihn optional.
 
 ## Prüfen
 
 - `pct exec <vmid> -- cat /run/secrets/runner-env` zeigt denselben Klartext wie beim `sops`-Aufruf; `findmnt /run/secrets` weist das Ziel als `tmpfs` aus. Gilt für beide Varianten.
 - **Hauptweg:** `pct exec <vmid> -- stat -c '%a %U:%G' /var/lib/sops-nix/key.txt` zeigt `600 root:root` – fehlt die Datei, wurde Punkt 3 übersprungen oder die Variante ist aktiv.
-- `pct exec <vmid> -- grep -rl "RUNNER_SITE" /run/current-system` liefert **keinen** Treffer mehr: Nur der Pfad wird referenziert; der alte Store-Pfad bleibt bis `nix-collect-garbage` liegen – die neue Fassung landet dort **nie**.
-- `pct exec <vmid> -- systemctl cat 'gitea-runner-*'` zeigt die `EnvironmentFile=`-Zeile aus Schritt 13 unverändert sowie eine zweite, jetzt auf `/run/secrets/runner-env`.
+- `pct exec <vmid> -- grep -rl "REGISTRY_MIRROR_PASSWORD" /run/current-system` liefert **keinen** Treffer – anders als `RUNNER_SITE`, das bewusst im Store bleiben darf (Klartextdatei, unverändert referenziert).
+- `pct exec <vmid> -- systemctl cat 'gitea-runner-*'` zeigt zwei `EnvironmentFile=`-Zeilen: `${./runner.env}` unverändert aus Schritt 12 und `/run/secrets/runner-env` neu daneben.
 - Der Runner-Dienst bleibt aktiv; `journalctl` zeigt keinen neuen Fehler.
-- **Zweiter Fall:** Store-Fassung enthält nur den Platzhalter: `pct exec <vmid> -- grep -rl SSSD_LDAP_DEFAULT_AUTHTOK /nix/store` findet die unsubstituierte `sssd.conf`. Laufzeit-Fassung: `pct exec <vmid> -- grep ldap_default_authtok /var/lib/sssd/sssd.conf` zeigt den echten Wert, `stat -c '%a' /var/lib/sssd/sssd.conf` liefert `600` – geschrieben von `preStart` unter `umask 0177`, außerhalb des Stores.<sup>5</sup>
-- Login aus Schritt 8 (`ssh -p <ssh-port> testuser@<ip>`) funktioniert unverändert weiter.
+- **Zweiter Fall:** `pct exec <vmid> -- grep -rl SSSD_LDAP_DEFAULT_AUTHTOK /nix/store` findet nur die unsubstituierte `sssd.conf` mit dem Platzhalter. `pct exec <vmid> -- grep ldap_default_authtok /var/lib/sssd/sssd.conf` zeigt dagegen den echten Wert, `stat -c '%a'` liefert `600` – geschrieben von `preStart` unter `umask 0177`, außerhalb des Stores.
+- Login aus Schritt 8 funktioniert unverändert weiter.
+- **Dritter Fall:** `pct exec <vmid> -- test -e /etc/gitea-runner-<runner-name>-token.env` schlägt fehl (Datei entfällt), `pct exec <vmid> -- cat /run/secrets/runner-token` zeigt das Token; der Runner bleibt in Forgejo online wie in Schritt 13.
 
 ## Wenn's schiefgeht
 
@@ -270,17 +294,17 @@ SSSD_LDAP_DEFAULT_AUTHTOK=<bind-passwort>
 
 **Build bricht mit `error: undefined variable 'config'` ab:** Funktionskopf nicht um `config` erweitert – nötig in beiden Varianten wegen `config.sops.secrets."runner-env".path`. Fix: Kopfzeile wie im Diff korrigieren.
 
-**Build bricht mit `error: undefined variable 'SSSD_LDAP_DEFAULT_AUTHTOK'` ab:** In `ldap.nix` `${SSSD_LDAP_DEFAULT_AUTHTOK}` statt `$SSSD_LDAP_DEFAULT_AUTHTOK` geschrieben – aus Shell-Gewohnheit naheliegend, aber `${...}` ist in einem `''…''`-Block Nix-Interpolation, keine Shell-Syntax. Nix versucht `SSSD_LDAP_DEFAULT_AUTHTOK` als eigene Variable auszuwerten und scheitert, lange bevor `envsubst` überhaupt läuft. Fix: Klammern weg, bare `$VAR` wie im Diff – exakt das Muster aus der Options-Beschreibung von `environmentFile`.<sup>5</sup>
+**Build bricht mit `error: undefined variable 'SSSD_LDAP_DEFAULT_AUTHTOK'` ab:** `${SSSD_LDAP_DEFAULT_AUTHTOK}` statt `$SSSD_LDAP_DEFAULT_AUTHTOK` geschrieben – aus Shell-Gewohnheit naheliegend, aber `${...}` ist in `''…''` Nix-Interpolation, keine Shell-Syntax; Nix wertet den Namen als eigene Variable aus und scheitert, bevor `envsubst` läuft. Fix: bare `$VAR` wie im Diff.<sup>5</sup>
 
-**Login scheitert ohne aussagekräftige Meldung, `journalctl -u sssd` zeigt nichts Auffälliges:** `secrets/sssd.env` fehlt eine Variable oder ihr Wert ist leer. `envsubst` ersetzt sie dann stillschweigend durch nichts, sssd bindet mit leerem Passwort, der LDAP-Server lehnt ab, ohne dass sssd das als Konfigurationsfehler meldet – die unangenehmste Fehlerart hier. Gegenprüfen mit `sops secrets/sssd.env` (entschlüsselt anzeigen) auf fehlende/leere Zeilen.
+**Login scheitert ohne aussagekräftige Meldung, `journalctl -u sssd` zeigt nichts Auffälliges:** `secrets/sssd.env` fehlt eine Variable oder ihr Wert ist leer – `envsubst` ersetzt sie stillschweigend durch nichts, sssd bindet mit leerem Passwort, der Server lehnt ab, ohne das als Konfigurationsfehler zu melden. Gegenprüfen mit `sops secrets/sssd.env` auf fehlende/leere Zeilen.
 
 ## Rückweg
 
-`EnvironmentFile`-Liste zurück auf `[ "${./runner.env}" ]`, `sops.*`-Zeilen und `config`-Argument entfernen, `sops-nix.nixosModules.sops` aus `flake.nix` streichen, rebuilden. Im Hauptweg zusätzlich `pct exec <vmid> -- rm -rf /var/lib/sops-nix`. `secrets/runner.env`/`.sops.yaml` können gefahrlos im Repo bleiben. Zweiter Fall zusätzlich: `services.sssd.environmentFile`- und `sops.secrets."sssd-env"`-Zeilen aus `ldap.nix` entfernen, `ldap_default_bind_dn`/`ldap_default_authtok` auf Klartext zurücksetzen (oder ganz weg, falls anonymer Bind reicht), rebuilden.
+`EnvironmentFile`-Liste zurück auf `[ "${./runner.env}" ]`, `tokenFile` zurück auf `"/etc/gitea-runner-<runner-name>-token.env"` (Datei wie in Schritt 13 neu anlegen), `sops.*`-Zeilen und `config`-Argument entfernen, `sops-nix.nixosModules.sops` aus `flake.nix` streichen, rebuilden. Hauptweg zusätzlich: `pct exec <vmid> -- rm -rf /var/lib/sops-nix`. `secrets/*.env`/`.sops.yaml` können gefahrlos liegen bleiben. Zweiter Fall zusätzlich: `environmentFile`-/`sops.secrets."sssd-env"`-Zeilen aus `ldap.nix` entfernen, Bind-Variablen auf Klartext zurücksetzen (oder streichen bei anonymem Bind).
 
 ## Querverweis
 
-sops-nix: Kapitel 10. SSH-Host-Key: Schritt 5. `pct push`: Schritt 2. Klartext-Gegenstück: Schritt 12, Token-Datei: Schritt 13. LDAP-Bind-Warnbox: Schritt 8. Projekt 2/3 übernehmen die Variante über mehrere Hosts hinweg.
+sops-nix: Kapitel 10. SSH-Host-Key: Schritt 5. `pct push`: Schritt 2. Klartext-Gegenstück: Schritt 12, Token-Datei: Schritt 13, Registry-Spiegel: Schritt 14. LDAP-Bind-Warnbox: Schritt 8. Projekt 2/3 übernehmen die Variante über mehrere Hosts hinweg.
 
 ---
 
@@ -292,6 +316,8 @@ sops-nix: Kapitel 10. SSH-Host-Key: Schritt 5. `pct push`: Schritt 2. Klartext-G
 
 <sup>4</sup> Quelle: `sops`-Quellcode (nicht sops-nix), `cmd/sops/main.go`, Befehl `updatekeys`: "update the keys of SOPS files using the config file". https://github.com/getsops/sops/blob/main/cmd/sops/main.go
 
-<sup>5</sup> Quelle: nixpkgs, `nixos/modules/services/misc/sssd.nix`. `environmentFile`: `type = lib.types.nullOr lib.types.path;`, `default = null;`, Options-Beschreibung mit dem Muster wörtlich: "Secrets may be passed to the service without adding them to the world-readable Nix store, by specifying placeholder variables as the option value in Nix and setting these variables accordingly in the environment file", Beispiel `ldap_default_authtok = $SSSD_LDAP_DEFAULT_AUTHTOK` / `SSSD_LDAP_DEFAULT_AUTHTOK=verysecretpassword`. Unit: `EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;`, Kommentar "We cannot use LoadCredential here because it's not available in ExecStartPre". `preStart`: `mkdir -p "${dataDir}/conf.d"`, dann unter `umask 0177` `${pkgs.envsubst}/bin/envsubst -o ${settingsFile} -i ${settingsFileUnsubstituted}`; `dataDir = "/var/lib/sssd"`, `settingsFile = "${dataDir}/sssd.conf"`. https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/services/misc/sssd.nix
+<sup>5</sup> Quelle: nixpkgs, `nixos/modules/services/misc/sssd.nix`. `environmentFile`-Options-Beschreibung wörtlich: "Secrets may be passed to the service without adding them to the world-readable Nix store, by specifying placeholder variables as the option value in Nix and setting these variables accordingly in the environment file", Beispiel `ldap_default_authtok = $SSSD_LDAP_DEFAULT_AUTHTOK`. Unit-Kommentar: "We cannot use LoadCredential here because it's not available in ExecStartPre". https://github.com/NixOS/nixpkgs/blob/release-26.05/nixos/modules/services/misc/sssd.nix
 
 <sup>6</sup> Quelle: sops-nix, `modules/sops/default.nix`. `sops.secrets.<name>.restartUnits`: "works the same way as systemd.services.<name>.restartTriggers". `systemd.services.sops-install-secrets`: `wantedBy = [ "sysinit.target" ]`, zusätzlich ein `system.activationScripts`-Eintrag beim `switch`. https://github.com/Mic92/sops-nix/blob/master/modules/sops/default.nix
+
+<sup>7</sup> Quelle: `systemd.exec`(5), `EnvironmentFile=`: "If the same variable is set twice from these files, the files will be read in the order they are specified and the later setting will override the earlier setting." https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html
