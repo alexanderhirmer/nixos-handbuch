@@ -10,7 +10,7 @@ SUMMARY.md                       mdBook-Inhaltsverzeichnis (beide Teile)
 GLOSSAR.md                       laufendes Glossar
 QUELLEN.md                       laufendes Quellenverzeichnis
 00-vorwort.md … 17-anhang.md     Teil I, vollständig (17 Kapitel + Anhang)
-projekt-1-forgejo-runner/        Teil II, Projekt 1 (in Arbeit)
+projekt-1-forgejo-runner/        Teil II, Projekt 1 (abgeschlossen, 16 Schritte)
 projekt-2-vaultwarden/           Teil II, Projekt 2 (noch nicht begonnen)
 projekt-3-fleet/                 Teil II, Projekt 3 (noch nicht begonnen)
 meta/                            Aufträge, Entscheidungen, Status — siehe unten

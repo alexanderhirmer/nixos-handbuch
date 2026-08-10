@@ -25,9 +25,9 @@ Ordner: `projekt-1-forgejo-runner/`
 - [x] 13. Der Runner ist mit einem in der Forgejo-Weboberfläche erzeugten Token registriert und online. → `13-runner-registrieren.md`
 - [x] 14. Ein Test-Workflow läuft erfolgreich über den neuen Runner durch. → `14-test-workflow.md`
 - [x] 15. Exkurs: dieselbe `.env` liegt stattdessen sops-age-verschlüsselt vor, der Unterschied zur Klartext-Variante ist erklärt. → `15-exkurs-sops-age.md`
-- [ ] 16. Projektabschluss: vollständiger Repo-Baum, gesammelte Endkonfiguration, 3–5 Ausbaustufen, Teardown-Anleitung stehen.
+- [x] 16. Projektabschluss: vollständiger Repo-Baum, gesammelte Endkonfiguration, 3–5 Ausbaustufen, Teardown-Anleitung stehen. → `16-projektabschluss.md`
 
-**Zuletzt erreichter Zustand:** Schritte 1–15 sind geschrieben. Der beschriebene Zielzustand: Container `<vmid>` läuft mit statischer `<ip>`, gehärteter Baseline (Key-only-Admin mit passwortlosem sudo, SSH auf Port 40, fail2ban, LDAP per sssd, Firewall nur Port 40 eingehend) und einem bei `<forgejo-url>` registrierten Forgejo-Runner, der Container-Jobs über Podman ausführt. Offen ist nur noch der Projektabschluss.
+**Projekt 1 ist abgeschlossen.** Alle 17 Dateien (`00`–`16`) liegen im Repo, `SUMMARY.md`, `GLOSSAR.md` und `QUELLEN.md` sind fortgeschrieben. Der beschriebene Zielzustand: Container `<vmid>` läuft mit statischer `<ip>`, gehärteter Baseline (Key-only-Admin mit passwortlosem sudo, SSH auf Port 40, fail2ban, LDAP per sssd, Firewall nur Port 40 eingehend) und einem bei `<forgejo-url>` registrierten Forgejo-Runner, der Container-Jobs über Podman ausführt. Offen ist nur noch der Projektabschluss.
 
 **Beim Schreiben gefundene und behobene Sachfehler** (relevant für Projekt 2/3, deshalb hier notiert):
 - `--ostype unmanaged` + Nixpkgs-Default `proxmoxLXC.manageNetwork = false` ergaben einen Container ohne IP und ohne DNS; `bootstrap.nix` in Schritt 1 wurde deshalb nachträglich um `manageNetwork = true` und `useDHCP = true` ergänzt. Details in `ENTSCHEIDUNGEN.md`.
@@ -83,4 +83,20 @@ Ordner: `projekt-3-fleet/` (noch nicht angelegt)
 
 ## Nächster Schritt insgesamt
 
-Projekt 1, Schritt 2 (Flake-Grundgerüst + `nixos-rebuild` von innen).
+Projekt 2, Schritt 0 (Architekturüberblick und Platzhaltertabelle für
+Vaultwarden: App-Host, DB-Host, interne Domain). Ordner
+`projekt-2-vaultwarden/` ist noch anzulegen.
+
+Aus Projekt 1 mitzunehmen:
+
+- Die Baseline aus `modules/baseline/` wird übernommen; zu erklären ist
+  nur der Unterschied (VM statt LXC, `disko` statt `pct create`-Skript).
+  Der LXC-Sonderfall aus `ENTSCHEIDUNGEN.md` — `--ostype unmanaged` plus
+  `proxmoxLXC.manageNetwork` — entfällt dort ersatzlos.
+- Das Muster "Zugangsdaten außerhalb von Repo und Store" (Schritt 8 und
+  13) wird in Projekt 2 durchgängig durch sops-age ersetzt; Schritt 15
+  ist der Vorgriff darauf und kann direkt referenziert werden.
+- Beim parallelen Schreiben mehrerer Schritte: Schritte, die sich
+  dieselbe Konfigurationsdatei teilen, gehören zusammen bearbeitet.
+  In Projekt 1 sind genau dort zwei Widersprüche entstanden (Token-Pfad,
+  Runner-Label), die erst die Durchsicht gefunden hat.
