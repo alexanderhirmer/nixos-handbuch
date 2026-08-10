@@ -5,7 +5,7 @@ weight: 16
 
 # Schritt 16: Projekt 1 ist fertig — ein gehärteter Forgejo-Runner-LXC läuft, ist registriert und hat einen grünen Testlauf hinter sich
 
-Die Schritte 1–14 haben aus einem leeren Proxmox-Host einen einzelnen, deklarativ verwalteten LXC-Container gemacht: NixOS-Bootstrap-Template, Baseline-Härtung (lokaler Fallback-Admin, passwortloses Sudo nur für ihn, SSH auf Port `<ssh-port>`, `fail2ban`, LDAP-Login über `sssd`, Firewall) und darauf aufbauend ein Forgejo-Actions-Runner mit Podman-Unterbau, registriert und mit einem echten Workflow-Lauf verifiziert. Dieser Abschluss trägt den Endzustand zusammen: den vollständigen Verzeichnisbaum, jede Datei einmal komplett, die übertragbaren Fähigkeiten, mögliche Ausbaustufen und einen vollständigen Teardown.
+Die Schritte 1–14 haben aus einem leeren Proxmox-Host einen deklarativ verwalteten LXC-Container gemacht: Bootstrap-Template, Baseline-Härtung (Fallback-Admin, passwortloses Sudo, SSH auf Port `<ssh-port>`, `fail2ban`, LDAP-Login über `sssd`, Firewall) und darauf ein Forgejo-Actions-Runner mit Podman-Unterbau, registriert und mit einem echten Workflow-Lauf verifiziert. Dieser Abschluss trägt den Endzustand zusammen: Verzeichnisbaum, jede Datei komplett, übertragbare Fähigkeiten, Ausbaustufen und Teardown.
 
 ## 1. Verzeichnisbaum im Endzustand
 
@@ -48,16 +48,21 @@ Nur relevant, wenn der sops-age-Exkurs (Schritt 15) tatsächlich nachgebaut wird
 <repo-root>/
 ├── .sops.yaml                       Schritt 15 (Exkurs)
 └── secrets/
-    └── runner.env                   Schritt 15 (Exkurs, sops-age-verschlüsselt)
+    ├── runner.env                   Schritt 15 (Exkurs, sops-age-verschlüsselt,
+    │                                 anderer Inhalt als modules/runner/runner.env)
+    ├── sssd.env                     Schritt 15 (Exkurs, LDAP-Bind-Passwort aus Schritt 8)
+    └── runner-token.env             Schritt 15 (Exkurs, Registrierungstoken aus Schritt 13)
 ```
 
 ### Was bewusst nicht im Repo liegt
 
-- **`/etc/gitea-runner-<runner-name>-token.env`** (Schritt 13) — das Registrierungstoken aus der Forgejo-Weboberfläche, mit `umask 077` angelegt und auf `root:root`/`600` gesetzt. `forgejo-runner.nix` referenziert den Pfad seit Schritt 11 nur als **String** (`tokenFile`), nicht als Nix-Pfad-Literal — genau deshalb landet der Inhalt nie im weltlesbaren Store.
-- **`/var/lib/gitea-runner/<runner-name>/`** — Laufzeitzustand (u. a. die Markerdatei `.runner`), den der Runner-Prozess selbst bei der ersten erfolgreichen Registrierung anlegt (Schritt 13, Prüfkriterium). Kein von Nix verwalteter Pfad; er entsteht und verschwindet mit der Registrierung, nicht mit einem `nixos-rebuild switch`.
-- **`/run/secrets/runner-env`** (Schritt 15, Exkurs) — sops-nix legt den entschlüsselten Klartext in ein `tmpfs`, nie in den Store. Existiert ausschließlich, wenn der Exkurs nachgebaut wurde; in der Hauptvariante (Schritt 12) gibt es diesen Pfad nicht, dort liegt `runner.env` stattdessen als Klartext unter `/nix/store/…-runner.env`.
-- **`/var/lib/sops-nix/key.txt`** (Schritt 15, Exkurs, nur im Hauptweg) — dein privater age-Schlüssel, per `pct push` von der Workstation auf den Container gebracht, `root:root`/`600`. Weder im Repo noch im Store: `sops.age.keyFile` ist als `pathNotInStore` typisiert, ein Store-Pfad würde vom Modulsystem abgelehnt. In der Variante mit getrennten Rollen existiert diese Datei gar nicht — dort bleibt der private Schlüssel auf der Workstation, und der Container nutzt seinen eigenen SSH-Host-Key als abgeleitete Identität.
-- **Die Workflow-Datei aus Schritt 14** (`.forgejo/workflows/runner-test.yaml`) — liegt in einem eigenständigen **Test-Repository auf der Forgejo-Instanz**, nicht in `<repo-root>`. Schritt 14 betont das ausdrücklich: Das NixOS-Infrastruktur-Repo, das diesen Abschluss zusammenfasst, und das Repository, dessen Workflows der Runner ausführt, sind zwei völlig getrennte Orte.
+- **`/etc/gitea-runner-<runner-name>-token.env`** (Schritt 13) — das Registrierungstoken aus der Forgejo-Weboberfläche, `umask 077`, `root:root`/`600`. `forgejo-runner.nix` referenziert den Pfad nur als **String** (`tokenFile`), nie als Pfad-Literal — deshalb landet der Inhalt nie im Store. Schritt 15 zeigt eine sops-Alternative: `tokenFile` zeigt dann auf `config.sops.secrets."runner-token".path`.
+- **`/var/lib/gitea-runner/<runner-name>/`** — Laufzeitzustand (u. a. Markerdatei `.runner`), den der Runner bei erster erfolgreicher Registrierung anlegt (Schritt 13). Kein von Nix verwalteter Pfad; entsteht/verschwindet mit der Registrierung.
+- **`/run/secrets/runner-env`** (Schritt 15, Exkurs) — sops-nix legt den entschlüsselten Klartext von `secrets/runner.env` in ein `tmpfs`. Existiert nur bei nachgebautem Exkurs — dann zusätzlich zur Klartextdatei aus Schritt 12 im Store: `forgejo-runner.nix` bindet beide gleichzeitig, mit unterschiedlichem Inhalt.
+- **`/run/secrets/sssd-env`** (Schritt 15, Exkurs, zweiter Fall) — enthält das entschlüsselte `secrets/sssd.env` (Bind-DN, -Passwort), ebenfalls `tmpfs`. Nicht als `EnvironmentFile=` am Unit gebunden: `preStart` ersetzt damit die `$SSSD_*`-Platzhalter in `sssd.conf` per `envsubst`.
+- **`/run/secrets/runner-token`** (Schritt 15, Exkurs, dritter Fall) — enthält das entschlüsselte `secrets/runner-token.env`; `tokenFile` zeigt hier darauf statt auf `/etc/gitea-runner-<runner-name>-token.env`.
+- **`/var/lib/sops-nix/key.txt`** (Schritt 15, Exkurs, nur im Hauptweg) — dein privater age-Schlüssel, per `pct push` auf den Container gebracht, `root:root`/`600`. Weder im Repo noch im Store: `keyFile` ist als `pathNotInStore` typisiert. In der Variante existiert diese Datei nicht — der Schlüssel bleibt auf der Workstation, der Container nutzt seinen SSH-Host-Key als Identität.
+- **Die Workflow-Datei aus Schritt 14** (`.forgejo/workflows/runner-test.yaml`) — liegt in einem eigenständigen **Test-Repository auf der Forgejo-Instanz**, nicht in `<repo-root>`: zwei getrennte Orte.
 
 ## 2. Gesammelte Endkonfiguration
 
@@ -286,7 +291,7 @@ pct start <vmid>
 }
 ```
 
-> ⚠️ Wenn `<ldap-uri>` einen authentifizierten Bind verlangt, gehören `ldap_default_bind_dn`/`ldap_default_authtok` zusätzlich in diese Datei — als Platzhalter, aufgelöst über `services.sssd.environmentFile` und eine Klartextdatei außerhalb des Repos (Schritt 8, Warnbox). Echtes Secrets-Management für diesen Wert gibt es in Projekt 1 nicht; siehe Ausbaustufe 5 unten.
+> ⚠️ Wenn `<ldap-uri>` einen authentifizierten Bind verlangt, gehören `ldap_default_bind_dn`/`ldap_default_authtok` zusätzlich in diese Datei — als Platzhalter, aufgelöst über `services.sssd.environmentFile` und eine Klartextdatei außerhalb des Repos (Schritt 8, Warnbox). Schritt 15 schließt die Lücke: Dieselbe Option zeigt dort auf ein sops-age-verschlüsseltes `secrets/sssd.env`, siehe Exkurs unten.
 
 ### `modules/baseline/firewall.nix` (Schritt 9)
 
@@ -388,7 +393,7 @@ TZ=Europe/Berlin
 
 ### Exkurs: sops-age-Variante (Schritt 15) — Alternative, kein Ersatz
 
-Der Exkurs ersetzt `modules/runner/runner.env` nicht, sondern stellt ihm die folgenden Dateien gegenüber. Er zeigt dabei **zwei** Wege, die sich nur im `sops.age`-Block unterscheiden: den Hauptweg mit deinem bereits vorhandenen age-Schlüssel und die Variante mit getrennten Rollen. `forgejo-runner.nix` existiert damit in insgesamt drei möglichen Fassungen — welche aktiv ist, entscheidet einzig, was tatsächlich in `<repo-root>/modules/runner/forgejo-runner.nix` steht. In keinem der beiden Wege wird ein age-Schlüssel erzeugt.
+Der Exkurs ersetzt `modules/runner/runner.env` nicht, sondern ergänzt sie: `forgejo-runner.nix` bindet Klartext- und sops-Fassung gleichzeitig — unkritisch im Store, geheim in `secrets/runner.env`. Dasselbe Muster schließt zwei weitere Lücken: das LDAP-Bind-Passwort aus Schritt 8 (`secrets/sssd.env`) und das Registrierungstoken aus Schritt 13 (`secrets/runner-token.env`). Hauptweg und Variante mit getrennten Rollen unterscheiden sich in allen drei Fällen nur im `sops.age`-Block; ein age-Schlüssel wird dabei nie erzeugt.
 
 ```yaml
 # <repo-root>/.sops.yaml — Hauptweg: dein vorhandener Schluessel als einziger Empfaenger
@@ -399,17 +404,35 @@ creation_rules:
           - <age-recipient>
 ```
 
-In der Variante kommt darunter ein zweiter Empfänger dazu: die `ssh-to-age`-Ausgabe aus dem SSH-Host-Key des Containers. Konkrete `age1…`-Werte stehen hier bewusst nirgends — ein echt aussehender Empfänger ließe sich kommentarlos kopieren.
+In der Variante kommt darunter ein zweiter Empfänger dazu: die `ssh-to-age`-Ausgabe aus dem SSH-Host-Key des Containers — bewusst ohne `age1…`-Beispielwert, den man kommentarlos kopieren könnte. `path_regex: secrets/.*\.env$` erfasst alle drei folgenden Dateien gleich, ohne weitere Änderung an `.sops.yaml`.
 
 ```bash
 # <repo-root>/secrets/runner.env (im Repo nur verschlüsselt abgelegt; hier der Klartext, den `sops` anzeigt)
-RUNNER_ENVIRONMENT=produktion
-RUNNER_SITE=rz-intern
-TZ=Europe/Berlin
+REGISTRY_MIRROR_USER=ci-mirror
+REGISTRY_MIRROR_PASSWORD=<registry-mirror-passwort>
 ```
 
+Zugangsdaten für den in Schritt 14 erwähnten internen Registry-Spiegel — anderer Inhalt als `modules/runner/runner.env`, das unverändert `RUNNER_ENVIRONMENT`/`RUNNER_SITE`/`TZ` trägt. Kriterium: unkritisch → Klartextdatei, geheim → sops.
+
+```bash
+# <repo-root>/secrets/sssd.env (im Repo nur verschlüsselt abgelegt; hier der Klartext, den `sops` anzeigt)
+SSSD_LDAP_URI=<ldap-uri>
+SSSD_LDAP_SEARCH_BASE=<ldap-base-dn>
+SSSD_LDAP_DEFAULT_BIND_DN=cn=svc-bind,<ldap-base-dn>
+SSSD_LDAP_DEFAULT_AUTHTOK=<bind-passwort>
+```
+
+Das Bind-Passwort aus der Warnbox zu `ldap.nix` oben — `SSSD_LDAP_DEFAULT_BIND_DN` steht nur beispielhaft für einen Service-Account unterhalb von `<ldap-base-dn>`.
+
+```bash
+# <repo-root>/secrets/runner-token.env (im Repo nur verschlüsselt abgelegt; hier der Klartext, den `sops` anzeigt)
+TOKEN=<token-aus-weboberflaeche>
+```
+
+Das Registrierungstoken aus Schritt 13 — Schritt 13 bleibt daneben gültig, dieser Exkurs ersetzt ihn nur optional.
+
 ```nix
-# <repo-root>/modules/runner/forgejo-runner.nix — ALTERNATIVE (Exkurs Schritt 15), ersetzt die obige Klartext-Fassung
+# <repo-root>/modules/runner/forgejo-runner.nix — ALTERNATIVE (Exkurs Schritt 15), bindet Klartext und sops gleichzeitig
 { config, pkgs, utils, ... }:
 {
   # Hauptweg: dein vorhandener Schluessel, per pct push nach
@@ -429,6 +452,11 @@ TZ=Europe/Berlin
     sopsFile = ../../secrets/runner.env;
     format = "dotenv";
   };
+  sops.secrets."runner-token" = {
+    sopsFile = ../../secrets/runner-token.env;
+    format = "dotenv";
+    restartUnits = [ "gitea-runner-${utils.escapeSystemdPath "<runner-name>"}.service" ];
+  };
 
   services.gitea-actions-runner = {
     package = pkgs.forgejo-runner;
@@ -438,7 +466,7 @@ TZ=Europe/Berlin
       name = "<runner-name>";
       url = "<forgejo-url>";
 
-      tokenFile = "/etc/gitea-runner-<runner-name>-token.env";
+      tokenFile = config.sops.secrets."runner-token".path;
 
       labels = [
         "ubuntu-latest:docker://node:20-bookworm"
@@ -447,10 +475,56 @@ TZ=Europe/Berlin
   };
 
   systemd.services."gitea-runner-${utils.escapeSystemdPath "<runner-name>"}".serviceConfig.EnvironmentFile = [
+    "${./runner.env}"
     config.sops.secrets."runner-env".path
   ];
 }
 ```
+
+`restartUnits` bei `"runner-token"` sorgt dafür, dass ein in Forgejo erneuertes Token den laufenden Dienst erreicht; `"runner-env"` braucht das nicht, Owner/Mode bleiben bei beiden Default (`root:root`, `0400`).
+
+```nix
+# <repo-root>/modules/baseline/ldap.nix — ALTERNATIVE (Exkurs Schritt 15), Bind-Passwort ueber sops
+{ config, ... }:
+{
+  services.sssd = {
+    enable = true;
+    config = ''
+      [sssd]
+      services = nss, pam
+      domains = ldap
+
+      [nss]
+
+      [pam]
+
+      [domain/ldap]
+      id_provider = ldap
+      auth_provider = ldap
+      ldap_uri = $SSSD_LDAP_URI
+      ldap_search_base = $SSSD_LDAP_SEARCH_BASE
+      ldap_default_bind_dn = $SSSD_LDAP_DEFAULT_BIND_DN
+      ldap_default_authtok = $SSSD_LDAP_DEFAULT_AUTHTOK
+      ldap_schema = rfc2307
+      cache_credentials = true
+      enumerate = false
+    '';
+    environmentFile = config.sops.secrets."sssd-env".path;
+  };
+
+  sops.secrets."sssd-env" = {
+    sopsFile = ../../secrets/sssd.env;
+    format = "dotenv";
+    restartUnits = [ "sssd.service" ];
+  };
+
+  # LDAP-Nutzer stehen nie in users.users – ohne das hier bliebe ihr
+  # $HOME beim ersten Login unangelegt.
+  security.pam.services.sshd.makeHomeDir = true;
+}
+```
+
+Anders als bei `runner-env`/`runner-token` landet `environmentFile` nicht als `EnvironmentFile=` am Unit: `preStart` ersetzt die `$SSSD_*`-Platzhalter per `envsubst` in `sssd.conf`, bevor sssd startet.
 
 ```nix
 # <repo-root>/flake.nix — ALTERNATIVE (Exkurs Schritt 15), ersetzt die Hauptvariante oben
@@ -475,33 +549,33 @@ TZ=Europe/Berlin
 }
 ```
 
-> 💡 **Nice to know:** Der Unterschied zwischen den beiden `forgejo-runner.nix`-Fassungen ist kein Detail: `"${./runner.env}"` ist ein Nix-**Pfad**-Literal (Store-Kopie beim Bauen, weltlesbar), `config.sops.secrets."runner-env".path` zur Auswertungszeit nur ein **String**, der erst beim Aktivieren auf `/run/secrets/runner-env` (`tmpfs`) zeigt. Beide Fassungen bauen ohne Fehler — der Unterschied zeigt sich erst darin, wo der Klartext am Ende tatsächlich liegt.
+> 💡 **Nice to know:** Pfad-Literal vs. String gilt unverändert: `"${./runner.env}"` kopiert beim Bauen in den Store, `config.sops.secrets."runner-env".path` bleibt bis zur Aktivierung ein String, der dann auf `/run/secrets/runner-env` (`tmpfs`) zeigt. Seit Schritt 15 kein Entweder-oder mehr: Die `EnvironmentFile`-Liste führt Klartext- und sops-Fassung gleichzeitig, mit unterschiedlichem Inhalt. Entweder-oder bleibt `tokenFile`: Schritt-13-Pfad oder `config.sops.secrets."runner-token".path`, nie beides.
 
 ## 3. Was du jetzt kannst
 
 - Einen Proxmox-LXC-Container vollständig deklarativ anlegen: minimales Bootstrap-Template + versioniertes `pct create`-Skript statt Ad-hoc-Klicks in der GUI.
-- Das Zusammenspiel von `--ostype unmanaged` und `proxmoxLXC.manageNetwork` durchschauen und für einen zweistufigen Bootstrap (minimal per Template, vollständig per `nixos-rebuild` von innen) gezielt nutzen.
-- NixOS-Module in wachsenden Sammel-Imports (`default.nix`) organisieren, bei denen jeder Arbeitsschritt genau eine neue Zeile hinzufügt — eine diff-freundliche, nachvollziehbare Konfigurationsgeschichte.
-- Merge-Verhalten listenwertiger Optionen gezielt einsetzen statt nur zu vermeiden: Reihenfolge bei `security.sudo.extraRules` (`mkOrder`), automatischer Listen-Merge bei `systemd.services.*.serviceConfig.EnvironmentFile` (`unitOption`).
-- Einen lokalen Fallback-Account sauber von LDAP-Nutzern trennen — `hashedPassword = null` plus `mutableUsers = false` als struktureller Sperrmechanismus für genau ein Konto, ohne eine globale SSH-Einstellung anzufassen.
+- Das Zusammenspiel von `--ostype unmanaged` und `proxmoxLXC.manageNetwork` für einen zweistufigen Bootstrap nutzen (minimal per Template, vollständig per `nixos-rebuild` von innen).
+- NixOS-Module in wachsenden Sammel-Imports (`default.nix`) organisieren, bei denen jeder Arbeitsschritt genau eine neue Zeile hinzufügt.
+- Merge-Verhalten listenwertiger Optionen gezielt einsetzen: Reihenfolge bei `security.sudo.extraRules` (`mkOrder`), Listen-Merge bei `systemd.services.*.serviceConfig.EnvironmentFile` (`unitOption`).
+- Einen lokalen Fallback-Account sauber von LDAP-Nutzern trennen — `hashedPassword = null` plus `mutableUsers = false` als Sperrmechanismus für genau ein Konto.
 - `sssd`/LDAP für Login parallel zu deklarativen Nix-Nutzern betreiben und einordnen, warum `users.mutableUsers` daran nichts ändert (separate NSS-Quelle `sss`).
-- systemd-Unit-Namen korrekt über `escapeSystemdPath` referenzieren, statt sie aus einem Instanznamen von Hand zusammenzubauen.
-- Zugangsdaten korrekt außerhalb des weltlesbaren Nix Store halten (`tokenFile`-Muster mit externer, `chmod 600`-geschützter Datei) und den qualitativen Unterschied zu einer sops-age-Lösung mit `/run/secrets` benennen.
-- Eine Container-Runtime (Podman) in einem unprivilegierten, genesteten LXC lauffähig machen — die richtigen Proxmox-Features (`nesting`, `keyctl`, `fuse`) und `fuse-overlayfs` als vorsorgliche statt reaktive Maßnahme.
-- Einen Forgejo-Actions-Runner registrieren und die Label-Semantik (`:docker://…` vs. `:host`) sowie die verfügbaren Registrierungs-Scopes (Instanz/Organisation/Nutzer/Repository) einordnen.
-- Ein Firewall-Modell konsequent für einen Dienst anwenden, der sich nur aktiv nach außen verbindet (Long-Polling) — eingehend zählt nur, was tatsächlich gebraucht wird.
+- systemd-Unit-Namen korrekt über `escapeSystemdPath` referenzieren, statt sie von Hand zusammenzubauen.
+- Zugangsdaten außerhalb des weltlesbaren Nix Store halten (`tokenFile`-Muster, `chmod 600`) und den Unterschied zu einer sops-age-Lösung mit `/run/secrets` benennen.
+- Eine Container-Runtime (Podman) in einem unprivilegierten, genesteten LXC lauffähig machen — die richtigen Proxmox-Features (`nesting`, `keyctl`, `fuse`) und `fuse-overlayfs` als vorsorgliche Maßnahme.
+- Einen Forgejo-Actions-Runner registrieren und die Label-Semantik (`:docker://…` vs. `:host`) sowie die Registrierungs-Scopes einordnen.
+- Ein Firewall-Modell konsequent für einen Dienst anwenden, der sich nur aktiv nach außen verbindet — eingehend zählt nur, was tatsächlich gebraucht wird.
 
 ## 4. Ausbaustufen
 
-1. **Mehrere Runner-Instanzen parallel.** `services.gitea-actions-runner.instances` ist ein `attrsOf submodule` (Schritt 11) — ein zweiter Eintrag mit eigenem Namen, eigenen Labels (z. B. eine andere Node-Version oder ein anderes Basis-Image) und eigener `tokenFile` läuft im selben Container, ohne die Modul-Struktur zu ändern. Sinnvoll, sobald ein Label-Typ zum CI-Engpass wird.
-2. **`:host`-Labels statt reiner Container-Jobs.** Ein zusätzliches Label wie `bare:host` in `forgejo-runner.nix` lässt Jobs direkt im Runner-Container laufen statt in einem gepullten Image — kein Pull, dafür explizite Pflege von `instances.<name>.hostPackages` (Default siehe Schritt 11/14). Sinnvoll für Jobs, die nur ohnehin vorhandene Werkzeuge brauchen.
-3. **Cache-/Registry-Spiegel im internen Netz.** Schritt 14 musste `node:20-bookworm` manuell mit `podman pull` vorab cachen, weil das Netz laut Projektrahmen ohne öffentlichen Zugriff auskommt. Ein interner OCI-Registry-Spiegel macht diesen manuellen Schritt überflüssig und beschleunigt jeden Neustart mit leerem Storage.
-4. **Monitoring des Runners.** Bislang liefert nur `journalctl -u gitea-runner-*` (Schritt 11/13) Einblick. Ein Metriken-Exporter, ergänzt um eine eng gefasste zusätzliche Firewall-Freigabe für den Scrape-Port (Schritt 9 als Vorlage: gezielt ein weiterer `allowedTCPPorts`-Eintrag statt einer pauschalen Öffnung), macht Jobdauer und Neustart-Zyklen sichtbar, statt sie erst im Fehlerfall zu suchen.
-5. **Deklaratives Secrets-Management für alle Werte.** Schritt 15 verschlüsselt nur `runner.env`; das LDAP-Bind-Passwort (Schritt 8, Warnbox zu `environmentFile`) und die Token-Datei (Schritt 13) liegen weiterhin als Klartext außerhalb des Store. Beide ließen sich nach demselben sops-age-Muster (eigener `sops.secrets`-Eintrag, Ziel-Option auf `config.sops.secrets."…".path`) verschlüsseln — der konsequente nächste Schritt, den Projekt 2 laut `ENTSCHEIDUNGEN.md` für echte Zugangsdaten ohnehin geht. Wer diese Stufe zündet, sollte zugleich vom Hauptweg auf die Variante mit getrennten Rollen wechseln: Je mehr Secrets an einem einzigen, auf dem Host liegenden Schlüssel hängen, desto teurer wird ein kompromittierter Host — und spätestens beim zweiten Host teilen sich beide denselben Generalschlüssel, was die Trennung zwischen ihnen aufhebt.
+1. **Mehrere Runner-Instanzen parallel.** `services.gitea-actions-runner.instances` ist ein `attrsOf submodule` (Schritt 11) — ein zweiter Eintrag mit eigenem Namen, Labels und `tokenFile` läuft im selben Container, ohne die Modul-Struktur zu ändern. Sinnvoll, sobald ein Label-Typ zum CI-Engpass wird.
+2. **`:host`-Labels statt reiner Container-Jobs.** Ein Label wie `bare:host` lässt Jobs direkt im Runner-Container laufen statt in einem gepullten Image — kein Pull, dafür Pflege von `instances.<name>.hostPackages` (Default siehe Schritt 11/14). Sinnvoll für Jobs mit ohnehin vorhandenen Werkzeugen.
+3. **Cache-/Registry-Spiegel im internen Netz.** Schritt 14 musste `node:20-bookworm` manuell mit `podman pull` cachen, weil das Netz ohne öffentlichen Zugriff auskommt. Ein interner OCI-Registry-Spiegel macht das überflüssig und beschleunigt jeden Neustart mit leerem Storage.
+4. **Monitoring des Runners.** Bislang liefert nur `journalctl -u gitea-runner-*` Einblick. Ein Metriken-Exporter mit eng gefasster zusätzlicher Firewall-Freigabe für den Scrape-Port (Schritt 9 als Vorlage) macht Jobdauer und Neustart-Zyklen sichtbar.
+5. **Mehrere Hosts am selben sops-age-Schema.** Schritt 15 verschlüsselt alle drei Secrets über den Hauptweg — einen age-Schlüssel als einzigen Empfänger, tragfähig für genau einen Container. Kommt ein zweiter hinzu, lohnt sich der Wechsel zur Variante mit getrennten Rollen: Der private Schlüssel bleibt auf der Workstation, jeder Container bekommt über seinen SSH-Host-Key eine eigene Identität in `.sops.yaml` — ein kompromittierter Container gibt dann nur sich selbst preis. Projekt 2/3 gehen diesen Weg von Anfang an.
 
 ## 5. Teardown
 
-Vollständiger Rückbau, in der Reihenfolge, die am wenigsten verwaiste Zustände hinterlässt: zuerst den Dienst beruhigen, dann die Forgejo-Seite bereinigen, dann lokale Spuren im Container entfernen, zuletzt Container und Template auf dem Proxmox-Host beseitigen.
+Vollständiger Rückbau, in der Reihenfolge mit den wenigsten verwaisten Zuständen: Dienst beruhigen, Forgejo bereinigen, lokale Spuren im Container entfernen, zuletzt Container und Template auf dem Proxmox-Host beseitigen.
 
 **1. Runner-Dienst stoppen** (verhindert, dass der Runner während der folgenden Schritte noch Jobs annimmt oder sich neu registriert):
 
@@ -509,9 +583,9 @@ Vollständiger Rückbau, in der Reihenfolge, die am wenigsten verwaiste Zuständ
 $ pct exec <vmid> -- systemctl stop "gitea-runner-$(systemd-escape '<runner-name>')"
 ```
 
-**2. Runner-Eintrag in Forgejo löschen.** In derselben Runner-Übersicht, in der Schritt 13 den Runner angelegt hat (instanzweit `/admin/actions/runners` bei entsprechendem Scope) — ohne diesen Schritt bleibt der Runner dort dauerhaft als "offline" gelistet, auch nachdem Container und Token längst verschwunden sind.
+**2. Runner-Eintrag in Forgejo löschen.** Dieselbe Runner-Übersicht wie bei der Registrierung (instanzweit `/admin/actions/runners`) — sonst bleibt der Runner dauerhaft als "offline" gelistet, auch nach Container- und Token-Löschung.
 
-> ⚠️ Ungeprüft: Der exakte UI-Pfad zum Löschen eines Runner-Eintrags wurde ebenso wenig direkt an der Forgejo-Oberfläche verifiziert wie der Registrierungspfad in Schritt 13 (`forgejo.org` war aus der Recherche-Umgebung nicht erreichbar) — plausibel dieselbe Übersichtsseite, die auch die Registrierung zeigt, aber vor Gebrauch gegenprüfen.
+> ⚠️ Ungeprüft: Der UI-Pfad zum Löschen wurde ebenso wenig verifiziert wie der Registrierungspfad in Schritt 13 (`forgejo.org` unerreichbar) — plausibel dieselbe Übersichtsseite, vor Gebrauch gegenprüfen.
 
 **3. Token-Datei und Laufzeitzustand im Container löschen:**
 
@@ -533,6 +607,6 @@ $ pct destroy <vmid>
 $ rm /var/lib/vz/template/cache/nixos-<hostname>-bootstrap.tar.xz
 ```
 
-**6. LXC-Features zurücksetzen.** Aus Schritt 10s Rückweg dokumentiert, hier der Vollständigkeit halber: `pct set <vmid> --features nesting=0,keyctl=0,fuse=0` gefolgt von `pct reboot <vmid>`. Praktisch ist dieser Befehl nach Schritt 4 bereits gegenstandslos — `pct destroy` entfernt die komplette Container-Konfiguration inklusive aller Feature-Flags. Relevant wird er nur in einem abweichenden Szenario: Wenn `<vmid>` **nicht** zerstört, sondern nur auf den Stand vor Schritt 10 zurückgesetzt werden soll (z. B. um denselben Container ohne Runner weiterzuverwenden), gehört dieser Befehl **vor** einen eventuellen `pct destroy` — dann muss der Container beim Ausführen noch existieren.
+**6. LXC-Features zurücksetzen.** Aus Schritt 10s Rückweg: `pct set <vmid> --features nesting=0,keyctl=0,fuse=0`, dann `pct reboot <vmid>`. Nach `pct destroy` gegenstandslos — relevant nur, wenn `<vmid>` **nicht** zerstört, sondern auf den Stand vor Schritt 10 zurückgesetzt wird; dann **vor** einem eventuellen `pct destroy`.
 
-Von `<repo-root>` selbst nimmt dieser Teardown nichts weg: Das Repo enthält an keiner Stelle Zugangsdaten (Token, LDAP-Bind-Passwort liegen beide außerhalb, siehe Abschnitt 1) und lässt sich unverändert für einen neuen Container-Anlauf wiederverwenden. `secrets/runner.env` und `.sops.yaml` aus dem Exkurs dürfen ebenfalls liegen bleiben — verschlüsselt und ohne Bezug zu diesem Container. Wurde der Hauptweg nachgebaut, verschwindet mit `pct destroy` auch die Kopie deines privaten age-Schlüssels unter `/var/lib/sops-nix/key.txt`; das Original auf deiner Workstation (`<age-key-file>`) bleibt davon selbstverständlich unberührt und wird für den nächsten Anlauf wieder gebraucht.
+Von `<repo-root>` nimmt dieser Teardown nichts weg: Das Repo enthält nirgends Zugangsdaten (Token, LDAP-Bind-Passwort außerhalb, siehe Abschnitt 1), unverändert wiederverwendbar. Die drei verschlüsselten Dateien `secrets/runner.env`, `secrets/sssd.env`, `secrets/runner-token.env` sowie `.sops.yaml` dürfen liegen bleiben. Wurde der Hauptweg nachgebaut, verschwindet mit `pct destroy` die Kopie deines age-Schlüssels unter `/var/lib/sops-nix/key.txt`; das Original (`<age-key-file>`) bleibt unberührt.

@@ -24,7 +24,7 @@ Ordner: `projekt-1-forgejo-runner/`
 - [x] 12. Eine `.env`-Datei mit Klartext-Werten ist angelegt und vom Runner eingebunden. → `12-env-datei.md`
 - [x] 13. Der Runner ist mit einem in der Forgejo-Weboberfläche erzeugten Token registriert und online. → `13-runner-registrieren.md`
 - [x] 14. Ein Test-Workflow läuft erfolgreich über den neuen Runner durch. → `14-test-workflow.md`
-- [x] 15. Exkurs: dieselbe `.env` liegt stattdessen sops-age-verschlüsselt vor, der Unterschied zur Klartext-Variante ist erklärt. → `15-exkurs-sops-age.md`
+- [x] 15. Exkurs: dieselbe `.env` liegt stattdessen sops-age-verschlüsselt vor, der Unterschied zur Klartext-Variante ist erklärt. **Auf Nutzerwunsch erweitert:** Der Exkurs behandelt zusätzlich LDAP-URI, Bind-DN und Bind-Passwort aus Schritt 8 — über `services.sssd.environmentFile` und `envsubst`-Platzhalter, womit die dort offen benannte Klartext-Lücke geschlossen ist. → `15-exkurs-sops-age.md`
 - [x] 16. Projektabschluss: vollständiger Repo-Baum, gesammelte Endkonfiguration, 3–5 Ausbaustufen, Teardown-Anleitung stehen. → `16-projektabschluss.md`
 
 **Projekt 1 ist abgeschlossen.** Alle 17 Dateien (`00`–`16`) liegen im Repo, `SUMMARY.md`, `GLOSSAR.md` und `QUELLEN.md` sind fortgeschrieben. Der beschriebene Zielzustand: Container `<vmid>` läuft mit statischer `<ip>`, gehärteter Baseline (Key-only-Admin mit passwortlosem sudo, SSH auf Port 40, fail2ban, LDAP per sssd, Firewall nur Port 40 eingehend) und einem bei `<forgejo-url>` registrierten Forgejo-Runner, der Container-Jobs über Podman ausführt. Offen ist nur noch der Projektabschluss.

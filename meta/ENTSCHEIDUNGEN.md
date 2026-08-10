@@ -62,6 +62,17 @@ Zwei Varianten, beide vom Nutzer freigegeben:
   erzeugt kein neues Schlüsselmaterial). Preis: zwei Empfänger und
   `sops updatekeys` nach jedem Neuaufsetzen eines Hosts.
 
+Schritt 15 deckt inzwischen drei Anwendungsfälle desselben Musters ab
+(Runner-`.env` neben der Klartextdatei, LDAP-Bind aus Schritt 8,
+Registrierungstoken aus Schritt 13) und liegt damit bei rund 1750
+Prosawörtern statt der 300–700 des Richtwerts. Eine Aufteilung in zwei
+Dateien wurde erwogen und vom Nutzer verworfen ("Kann erstmal so
+bleiben") — die Länge ist also gewollt, kein Versehen. Begründung: Ein
+Exkurs wird am Stück gelesen, nicht Schritt für Schritt nachgebaut, und
+die drei Fälle leben davon, dasselbe Muster dreimal wiederzuerkennen.
+Falls Projekt 2 den Exkurs stark referenziert, kann eine Aufteilung
+später immer noch sinnvoll werden.
+
 **Für Projekt 2 und 3 ist die getrennte Variante der Zielzustand** — dort
 gibt es mehrere Hosts, und ein Schlüssel, der auf allen liegt, hebt die
 Trennung zwischen ihnen auf. Schritt 15 erklärt beide Wege bereits, die
